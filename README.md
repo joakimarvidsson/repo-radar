@@ -1,351 +1,187 @@
 # repo-radar
 
-`repo-radar` is a local-first CLI for discovering repositories and repo-like project
-folders, classifying them, reconciling local Git state with GitHub when possible, and
-producing token-efficient AI-ready outputs for later use by models and agents.
+**Public alpha:** `repo-radar` is usable today, but the CLI, scoring heuristics, and
+output schemas may still change before a stable release.
 
-It is designed to be generic and open-source-friendly. No personal paths, hostnames,
-or usernames are required in the repository. Environment-specific inputs live in
-command-line options, saved local runtime state, or an optional `repo_radar.yaml`.
+`repo-radar` is a local-first command-line tool for finding repositories and
+repo-like folders on a messy development machine, grouping and prioritizing them, and
+producing compact AI-ready handoff files.
 
-## Why repo-radar exists
+It is built for people who have many local projects, old experiments, cloned repos,
+monorepos, package caches, and editor/plugin directories mixed together. The default
+workflow works without a config file.
 
-AI agents often need a compact view of many repositories before deciding where to spend
-context. Packing every repository in full is expensive and noisy. `repo-radar` stages
-the workflow so agents can inspect progressively:
+## What it does
+
+- Discovers Git repositories and repo-like folders from local roots.
+- Works with zero config: `repo-radar scan`, `repo-radar handoff`, and
+  `repo-radar inventory` use saved state or sensible local auto-discovery.
+- Supports explicit roots such as `--root ~/projects` or broad scans such as `--root ~`.
+- Suppresses obvious broad-scan noise like package caches, editor extensions,
+  notebook checkpoints, generated folders, plugin marketplaces, and system folders.
+- Distinguishes monorepo roots, monorepo subprojects, standalone projects, and
+  container directories.
+- Detects likely duplicates with explainable signals and confidence.
+- Produces JSON and Markdown outputs for humans and AI agents.
+- Uses Repomix as the default backend for compressed and full AI-ready repo packs.
+- Optionally reconciles GitHub remotes through `gh` when it is installed and authenticated.
+
+## Quickstart
+
+The recommended alpha workflow is to run from source with Python 3.12+ and `uv`.
+`repo-radar` is not yet published as a stable package.
+
+```bash
+git clone <repo-url>
+cd repo-radar
+uv sync
+uv run repo-radar doctor
+uv run repo-radar scan --dry-run
+uv run repo-radar handoff
+```
+
+Scan a specific folder:
+
+```bash
+uv run repo-radar scan --root ~/projects
+uv run repo-radar handoff --root ~/projects
+```
+
+Scan your home directory with broad-scan suppression enabled:
+
+```bash
+uv run repo-radar doctor --root ~
+uv run repo-radar scan --dry-run --root ~
+uv run repo-radar handoff --root ~
+```
+
+Include normally suppressed cache/vendor/generated entries only when you explicitly
+want to inspect them:
+
+```bash
+uv run repo-radar scan --dry-run --root ~ --include-noise
+```
+
+## Staged workflow
+
+`repo-radar` is designed to avoid packing everything blindly:
 
 ```text
-inventory -> digest -> shortlist -> full pack -> agent brief
+inventory -> digest -> shortlist -> full pack -> agent brief / handoff
 ```
 
-- Inventory records what exists and what each folder probably is.
-- Digests use compressed Repomix output first, reducing tokens while preserving structure.
-- Shortlists choose the most useful repositories under a token budget.
-- Full packs are generated only for shortlisted repositories.
-- Agent briefs summarize what to inspect first, where duplicates or drift might exist,
-  and which repositories need follow-up.
-
-## Features
-
-- Discover Git repositories and repo-like folders across configurable local roots.
-- Optionally discover remote folders over SSH through a generic source adapter.
-- Detect common project markers such as `pyproject.toml`, `requirements.txt`,
-  `package.json`, `Cargo.toml`, `go.mod`, `src/`, `notebooks/`, and `.github/`.
-- Extract Git metadata, remotes, current branch, default branch, last commit date,
-  dirty status, ahead/behind status, languages, file counts, size, and key directories.
-- Reconcile GitHub remotes with the `gh` CLI when available and authenticated.
-- Detect likely orphan local repositories, remote mismatches, renamed repositories,
-  and public/private visibility when GitHub allows it.
-- Cluster probable duplicates with explainable signals from remotes, manifests,
-  folder signatures, README hashes, and structural similarity.
-- Rank repositories with inspectable positive and negative scoring factors.
-- Assign action labels such as `INSPECT`, `KEEP`, `ARCHIVE_CANDIDATE`,
-  `MERGE_CANDIDATE`, `DUPLICATE_OF`, and `NEEDS_RECONCILIATION`.
-- Suppress noisy broad-scan results such as package caches, editor extensions,
-  notebook checkpoints, generated folders, and plugin marketplaces by default.
-- Distinguish monorepo roots, monorepo subprojects, standalone projects, and
-  container directories so nested apps are not mistaken for duplicates.
-- Generate JSON, Markdown, priority queues, compressed digests, full packs, and agent briefs.
-- Generate compact AI handoff notes for a coding agent or model.
-- Support dry runs for discovery and packing commands.
-- Use Repomix as the default AI-friendly packer backend.
-- Keep a backend seam for optional Code2Prompt support later.
-
-## Installation
-
-Use Python 3.12 or newer.
+Common commands:
 
 ```bash
-uv sync
-uv run repo-radar --help
+uv run repo-radar inventory
+uv run repo-radar digest
+uv run repo-radar shortlist
+uv run repo-radar pack
+uv run repo-radar brief
+uv run repo-radar handoff
 ```
 
-For editable development without `uv`:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -e ".[dev]"
-repo-radar --help
-```
+`agent_handoff.md` is the compact AI-facing artifact. `agent_brief.md` is a fuller
+summary.
 
 ## Configuration
 
-No config file is required for normal use:
+Config is optional. Without `--config`, runtime source precedence is:
 
-```bash
-repo-radar scan
-repo-radar handoff
-repo-radar inventory
+```text
+CLI flags > saved local state > auto-discovery
 ```
 
-When no `--config` is supplied, `repo-radar` uses CLI inputs first, then saved local
-runtime state, then automatic local root discovery. If the current working directory
-already looks like a project, it scans that directory and warns that only the current
-project is being scanned. Otherwise it checks common developer directories such as
-`~/projects`, `~/Projects`, `~/code`, `~/Code`, `~/github`, `~/GitHub`, and `~/Documents`.
-
-Create a config only when you want a reusable checked-in or shared setup:
+Use `repo_radar.yaml` only when you want a reusable configuration:
 
 ```bash
 cp examples/repo_radar.sample.yaml repo_radar.yaml
+uv run repo-radar scan --config repo_radar.yaml
 ```
 
-Edit roots and optional SSH sources:
+CLI overrides are usually enough:
 
-```yaml
-local_roots:
-  - /path/to/workspace
-
-ssh_sources:
-  - name: staging-box
-    host: example.invalid
-    user: deploy
-    roots:
-      - /srv/projects
-    enabled: false
+```bash
+uv run repo-radar scan --root /path/to/workspace
+uv run repo-radar scan --root /path/one --root /path/two
+uv run repo-radar scan --ssh user@example.invalid --ssh-root /srv/projects
 ```
 
-Keep secrets out of config. SSH authentication should use your normal SSH agent or
-read-only deploy keys.
-
-`repo-radar` remembers last-used roots and SSH inputs in a local runtime state file.
-By default this is under `~/.local/state/repo-radar/state.json`, or under
-`$XDG_STATE_HOME/repo-radar/state.json` when `XDG_STATE_HOME` is set. Tests and
-automation can override it with `REPO_RADAR_STATE_PATH`.
-
-Precedence is:
+Last-used local roots and SSH settings are saved in a local state file. The default is:
 
 ```text
-CLI flags > explicit --config > saved state > auto-discovery
+~/.local/state/repo-radar/state.json
 ```
 
-## CLI workflow
+Set `REPO_RADAR_STATE_PATH` in tests or automation to override that location.
 
-Run the whole staged flow without writing outputs:
+## Broad scans
 
-```bash
-repo-radar scan --dry-run
-```
+Broad roots such as `--root ~` are allowed, but they are treated carefully.
+`repo-radar` warns before broad scans, bounds traversal, and excludes noisy directories
+such as:
 
-Scan a specific local root without editing config:
+- `.git`, `.venv`, `node_modules`, `.cache`
+- `.bun`, `.npm`, `.pnpm-store`
+- `.cursor`, `.vscode`, `.antigravity`
+- `Library`, `Downloads`, `Movies`, `Music`, `Pictures`, `Applications`, `Trash`
+- `.ipynb_checkpoints`, `.virtual_documents`
+- generated `outputs`, `build`, `dist`, and `target`
 
-```bash
-repo-radar scan --root /path/to/workspace
-repo-radar inventory --root /path/to/workspace --root /path/to/another/workspace
-```
+The aim is to surface real user projects first. Use `--include-noise` for forensic
+inspection of suppressed content.
 
-Broad roots such as `--root ~` are allowed when explicitly requested. `repo-radar`
-prints a warning and keeps strong default exclusions for noisy directories including
-`.git`, `.venv`, `node_modules`, `.cache`, `Library`, `Downloads`, `Movies`, `Music`,
-`Pictures`, `Applications`, `Trash`, and generated `outputs`.
+## Monorepos and duplicates
 
-Include suppressed broad-scan noise only when you explicitly want to inspect it:
+Nested projects inside a shared Git root are treated as monorepo relationships, not
+automatic duplicates. Records can be labeled as:
 
-```bash
-repo-radar scan --root ~ --include-noise --dry-run
-repo-radar handoff --root ~ --include-noise
-```
+- `MONOREPO_ROOT`
+- `MONOREPO_SUBPROJECT`
+- `CONTAINER_DIRECTORY`
+- `STANDALONE_PROJECT`
 
-Force or disable auto-discovery:
-
-```bash
-repo-radar scan --auto
-repo-radar doctor --no-auto
-```
-
-Add an SSH source from the CLI:
-
-```bash
-repo-radar scan --ssh user@example.invalid --ssh-root /srv/projects
-```
-
-Write inventory files:
-
-```bash
-repo-radar inventory --config repo_radar.yaml
-```
-
-Reconcile local Git remotes against GitHub:
-
-```bash
-repo-radar reconcile --config repo_radar.yaml
-```
-
-Create compressed Repomix digests:
-
-```bash
-repo-radar digest --config repo_radar.yaml
-```
-
-Build a token-budget-aware queue:
-
-```bash
-repo-radar shortlist --config repo_radar.yaml --token-budget 200000 --limit 10
-```
-
-Create full packs only for shortlisted repositories:
-
-```bash
-repo-radar pack --config repo_radar.yaml
-```
-
-Write an agent brief:
-
-```bash
-repo-radar brief --config repo_radar.yaml
-```
-
-Write a compact AI handoff:
-
-```bash
-repo-radar handoff --config repo_radar.yaml
-```
-
-Or run the staged flow in one command:
-
-```bash
-repo-radar scan --config repo_radar.yaml
-repo-radar scan --config repo_radar.yaml --pack
-```
-
-Validate configuration and local tool availability:
-
-```bash
-repo-radar doctor
-repo-radar config-check --config repo_radar.yaml
-repo-radar doctor --config repo_radar.yaml
-```
+Duplicate clusters use explainable signals such as normalized remotes, manifest names,
+README hashes/titles, top-level signatures, basename variants, and structural similarity.
+Monorepo subprojects are protected from weak duplicate signals so normal app/package
+layouts do not become misleading merge candidates.
 
 ## Outputs
 
-`repo-radar` writes:
+Generated outputs live under `outputs/`:
 
-- `outputs/repo_inventory.json`
-- `outputs/repo_inventory.md`
-- `outputs/repo_groups.json`
-- `outputs/repo_priority_queue.json`
-- `outputs/repo_digests/`
-- `outputs/repo_fullpacks/`
-- `outputs/agent_brief.md`
-- `outputs/agent_handoff.md`
+- `repo_inventory.json`
+- `repo_inventory.md`
+- `repo_groups.json`
+- `repo_priority_queue.json`
+- `repo_digests/`
+- `repo_fullpacks/`
+- `agent_brief.md`
+- `agent_handoff.md`
 
-Digest and full-pack directories also receive `pack_metadata.json` manifests with packer
-commands, success/failure counts, and per-repository result records.
-
-`agent_brief.md` and `agent_handoff.md` include the effective scan source mode and roots
-used for that run, so downstream agents can see whether results came from CLI flags,
-explicit config, saved state, or auto-discovery.
-
-Generated output files are ignored by git except for placeholders and the sample brief.
-
-## Repomix backend
-
-Repomix is the default packer because it can produce AI-oriented XML, Markdown, JSON,
-or plain-text repository packs, respects ignore rules, includes security checks, and
-supports compression with `--compress`.
-
-`repo-radar digest` uses compressed Repomix packs by default. `repo-radar pack` creates
-full packs for shortlisted repositories only.
-
-If `repomix` is installed, `repo-radar` uses it. Otherwise it falls back to:
-
-```bash
-npx --yes repomix@latest
-```
-
-Relevant Repomix options are configured under `packer:` in `repo_radar.yaml`.
+Generated output files are ignored by Git except for placeholders and the sanitized
+sample `outputs/agent_brief.md`.
 
 ## GitHub reconciliation
 
-When `github.enabled` is true, `repo-radar` parses GitHub SSH/HTTPS remotes and uses
-`gh repo view` when the GitHub CLI is available and authenticated.
+When enabled, GitHub reconciliation parses GitHub remotes and uses `gh repo view`.
+If `gh` is missing or unauthenticated, scanning still works and reconciliation fields
+record why live GitHub data was unavailable.
 
-It records whether the repository exists, its visibility, the default branch, whether
-the local remote identity matches GitHub, and whether a local repository looks orphaned.
+GitHub lookup results are cached by default under:
 
-If `gh` is missing or unauthenticated, inventory still works. Reconciliation fields record
-the reason GitHub metadata could not be checked.
-
-GitHub lookups are cached by default under `outputs/.cache/github_reconciliation.json`.
-Set `github.cache_ttl_seconds` to control refresh cadence, or disable caching with:
-
-```yaml
-github:
-  cache_enabled: false
+```text
+outputs/.cache/github_reconciliation.json
 ```
 
-## Duplicate detection and scoring
+## Current limitations
 
-Duplicate detection is deterministic and explainable. Repo records can receive a
-`duplicate_cluster_id`, `duplicate_confidence`, `duplicate_signals`, and
-`likely_canonical` when practical heuristics agree:
-
-- normalized Git remote URL match
-- same resolved local path discovered through different roots
-- same manifest/package name
-- same README title
-- same README content hash
-- same top-level folder signature
-- normalized basename and obvious suffix variants such as `-old`, `_backup`, `-copy`,
-  and dated variants
-- same basename with strong structural or manifest similarity
-
-Shortlist scoring writes a `score_breakdown` for every ranked repo in
-`outputs/repo_priority_queue.json`. Positive factors include maturity, recent activity,
-clean Git state, source/test/docs structure, classification confidence, and packability.
-Negative factors include duplicate penalties, GitHub drift, orphan remotes, stale repos,
-and incomplete project signals.
-
-Rendered inventory, brief, handoff, and groups outputs include action-oriented
-recommendation labels so the result is not just a list of repositories. The grouped views
-highlight inspect-first repos, duplicate clusters, canonical repos, merge candidates,
-archive candidates, orphan local repos, and repositories needing reconciliation.
-
-Monorepo relationships are handled separately from duplicate clusters. A parent repo with
-`apps/`, `packages/`, `services/`, `examples/`, or similar child manifests can be labeled
-`MONOREPO_ROOT`, while nested projects become `MONOREPO_SUBPROJECT`. Those subprojects are
-not marked as `DUPLICATE_OF` or `MERGE_CANDIDATE` just because they share the same Git
-remote or similar manifests.
-
-Broad container directories such as a home directory, `Projects`, `Documents`, or
-`My Drive` can be labeled `CONTAINER_DIRECTORY`; they are deprioritized so the handoff
-points at real child projects instead of the folder that contains them.
-
-## Noise suppression
-
-Broad scans classify repo-like folders into practical noise classes:
-
-- `USER_PROJECT`
-- `SYSTEM_OR_VENDOR`
-- `CACHE_OR_PACKAGE_STORE`
-- `GENERATED_OR_EPHEMERAL`
-- `EDITOR_EXTENSION`
-- `NOTEBOOK_CHECKPOINT`
-- `UNKNOWN`
-
-By default, suppressed noise is excluded from broad scans where possible and heavily
-penalized when explicitly included with `--include-noise`. Suppressed items are not
-selected for the shortlist and are summarized by class in AI handoff outputs instead of
-being listed individually.
-
-## SSH scanning
-
-SSH sources are optional and disabled by default. When enabled, the adapter runs read-only
-remote commands using `ssh`, `find`, marker checks, and `du`. It does not clone, modify,
-or write to remote hosts.
-
-Use conservative roots and max depth values:
-
-```yaml
-ssh_sources:
-  - name: remote-example
-    host: example.invalid
-    roots:
-      - /srv/projects
-    max_depth: 4
-    enabled: true
-```
+- This is an alpha. Output schema details and scoring weights may change.
+- Duplicate and recommendation logic is heuristic, not a proof of repository identity.
+- SSH discovery is intentionally shallow and read-only.
+- Code2Prompt is not integrated yet; Repomix is the default packer.
+- No PyPI package is published yet; run from source for now.
+- Broad scans are tuned for practical local machines, not exhaustive filesystem forensics.
 
 ## Development
 
@@ -353,13 +189,10 @@ ssh_sources:
 uv sync
 uv run pytest
 uv run ruff check .
+uv run ruff format . --check
 uv run python -m compileall src tests
-uv run repo-radar doctor
-uv run repo-radar scan --dry-run
-uv run repo-radar handoff
 ```
 
-## Open-source roadmap
+## Roadmap
 
-See `docs/ROADMAP.md` for planned improvements around richer source adapters,
-Code2Prompt support, better duplicate detection, richer token accounting, and CI packaging.
+See [docs/ROADMAP.md](docs/ROADMAP.md).

@@ -1,5 +1,12 @@
 # repo-radar Roadmap
 
+## Alpha scope
+
+- Keep zero-config local scans reliable and predictable.
+- Improve broad-scan precision on real development machines.
+- Keep output artifacts useful for AI agents without overfilling context.
+- Keep docs honest while the CLI and schemas are still stabilizing.
+
 ## Near term
 
 - Add a `state clear` or `state show` command for runtime state inspection.
@@ -32,7 +39,6 @@
 
 ## Open-source readiness
 
-- Add contribution guidelines and a security policy.
 - Publish typed API documentation.
 - Build release artifacts for PyPI.
 - Add examples for common monorepo, homelab, and organization workspace layouts.

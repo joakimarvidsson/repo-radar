@@ -35,11 +35,6 @@ dev = [
   "ruff>=0.6",
 ]
 
-[project.urls]
-Homepage = "https://github.com/example/repo-radar"
-Repository = "https://github.com/example/repo-radar"
-Issues = "https://github.com/example/repo-radar/issues"
-
 [project.scripts]
 repo-radar = "repo_radar.cli:app"
 

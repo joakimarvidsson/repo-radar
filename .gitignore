@@ -4,6 +4,7 @@
 .vscode/
 .omx/
 .omc/
+AGENTS.md
 
 # Python
 __pycache__/
