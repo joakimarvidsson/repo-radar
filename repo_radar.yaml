@@ -1,0 +1,52 @@
+# Generic local configuration for repo-radar.
+# Replace roots and optional SSH sources with environment-specific values.
+
+local_roots:
+  - .
+
+local_sources: []
+
+ssh_sources: []
+
+max_depth: 5
+
+ignore_patterns:
+  - .git/**
+  - .venv/**
+  - node_modules/**
+  - dist/**
+  - build/**
+  - target/**
+  - outputs/**
+
+include_patterns: []
+
+outputs_dir: outputs
+
+github:
+  enabled: true
+  use_gh: true
+  timeout_seconds: 10
+
+packer:
+  backend: repomix
+  command:
+  style: xml
+  include_patterns: []
+  ignore_patterns:
+    - .git/**
+    - .venv/**
+    - node_modules/**
+    - dist/**
+    - build/**
+    - target/**
+    - outputs/**
+  security_check: true
+  remove_comments: false
+  remove_empty_lines: false
+  extra_args: []
+  token_count_encoding: o200k_base
+
+shortlist:
+  token_budget: 200000
+  max_repos: 10

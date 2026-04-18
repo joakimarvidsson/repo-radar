@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "repo-radar"
+version = "0.1.0"
+description = "Local-first repository discovery, reconciliation, and AI-ready packing."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "repo-radar contributors" }
+]
+keywords = ["repository", "inventory", "github", "repomix", "ai", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+dependencies = [
+  "pydantic>=2.7",
+  "pyyaml>=6.0.1",
+  "rich>=13.7",
+  "typer>=0.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/example/repo-radar"
+Repository = "https://github.com/example/repo-radar"
+Issues = "https://github.com/example/repo-radar/issues"
+
+[project.scripts]
+repo-radar = "repo_radar.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/repo_radar"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

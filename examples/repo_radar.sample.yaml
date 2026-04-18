@@ -1,0 +1,68 @@
+# Sample repo-radar configuration.
+# Copy to repo_radar.yaml and replace placeholders for your environment.
+
+local_roots:
+  - /path/to/workspace
+  - /path/to/another/workspace
+
+local_sources:
+  - name: local-workspace
+    roots:
+      - /path/to/workspace
+    max_depth: 5
+    enabled: true
+
+ssh_sources:
+  - name: remote-projects
+    host: example.invalid
+    user: deploy
+    port: 22
+    roots:
+      - /srv/projects
+    max_depth: 4
+    enabled: false
+    timeout_seconds: 30
+
+max_depth: 5
+
+ignore_patterns:
+  - .git/**
+  - .venv/**
+  - node_modules/**
+  - dist/**
+  - build/**
+  - target/**
+  - outputs/**
+  - "**/.cache/**"
+
+include_patterns: []
+
+outputs_dir: outputs
+
+github:
+  enabled: true
+  use_gh: true
+  timeout_seconds: 10
+
+packer:
+  backend: repomix
+  command:
+  style: xml
+  include_patterns: []
+  ignore_patterns:
+    - .git/**
+    - .venv/**
+    - node_modules/**
+    - dist/**
+    - build/**
+    - target/**
+    - outputs/**
+  security_check: true
+  remove_comments: false
+  remove_empty_lines: false
+  extra_args: []
+  token_count_encoding: o200k_base
+
+shortlist:
+  token_budget: 200000
+  max_repos: 10
