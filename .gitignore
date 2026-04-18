@@ -26,4 +26,3 @@ build/
 # Generated repo-radar outputs
 outputs/*
 !outputs/.gitkeep
-!outputs/agent_brief.md

@@ -159,8 +159,8 @@ Generated outputs live under `outputs/`:
 - `agent_brief.md`
 - `agent_handoff.md`
 
-Generated output files are ignored by Git except for placeholders and the sanitized
-sample `outputs/agent_brief.md`.
+Generated output files are ignored by Git. The repository keeps only `outputs/.gitkeep`
+so the output directory exists in fresh checkouts.
 
 ## GitHub reconciliation
 
