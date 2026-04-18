@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
+import tomllib
 from collections import Counter
 from pathlib import Path
 
@@ -50,6 +53,7 @@ def extract_local_metadata(
     is_git = (path / ".git").exists() or _git_is_repo(path)
     file_count, size_bytes, languages = _file_stats(path, ignore_patterns, include_patterns)
     key_dirs = [name for name in KEY_DIRECTORIES if (path / name).is_dir()]
+    manifest_names = _manifest_names(path)
 
     return RepoRecord(
         path=str(path),
@@ -65,6 +69,9 @@ def extract_local_metadata(
         file_count=file_count,
         estimated_size_bytes=size_bytes or project.estimated_size_bytes,
         key_directories=key_dirs,
+        manifest_names=manifest_names,
+        readme_hash=_readme_hash(path),
+        top_level_signature=_top_level_signature(path),
     )
 
 
@@ -181,3 +188,68 @@ def _file_stats(
         if language:
             languages[language] += 1
     return file_count, size_bytes, languages
+
+
+def _manifest_names(path: Path) -> list[str]:
+    names: set[str] = set()
+    pyproject = path / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            project_name = data.get("project", {}).get("name")
+            poetry_name = data.get("tool", {}).get("poetry", {}).get("name")
+            for name in [project_name, poetry_name]:
+                if isinstance(name, str) and name.strip():
+                    names.add(name.strip())
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
+
+    package_json = path / "package.json"
+    if package_json.is_file():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+            package_name = data.get("name")
+            if isinstance(package_name, str) and package_name.strip():
+                names.add(package_name.strip())
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    cargo = path / "Cargo.toml"
+    if cargo.is_file():
+        try:
+            data = tomllib.loads(cargo.read_text(encoding="utf-8"))
+            package_name = data.get("package", {}).get("name")
+            if isinstance(package_name, str) and package_name.strip():
+                names.add(package_name.strip())
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
+    return sorted(names)
+
+
+def _readme_hash(path: Path) -> str | None:
+    for name in ["README.md", "README.rst", "README.txt"]:
+        readme = path / name
+        if readme.is_file():
+            try:
+                content = readme.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                return None
+            normalized = " ".join(content.lower().split())
+            if not normalized:
+                return None
+            return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return None
+
+
+def _top_level_signature(path: Path) -> str | None:
+    try:
+        names = [
+            child.name
+            for child in path.iterdir()
+            if child.name not in DEFAULT_SKIP_DIRS and not child.name.startswith(".repo-radar")
+        ]
+    except OSError:
+        return None
+    if not names:
+        return None
+    return "|".join(sorted(names))

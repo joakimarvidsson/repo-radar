@@ -18,7 +18,12 @@ from repo_radar.pipeline import (
     run_scan,
     write_inventory_outputs,
 )
-from repo_radar.rendering import render_agent_brief, render_groups, render_inventory
+from repo_radar.rendering import (
+    render_agent_brief,
+    render_agent_handoff,
+    render_groups,
+    render_inventory,
+)
 from repo_radar.shortlist import build_priority_queue, render_priority_queue
 
 app = typer.Typer(help="Discover repositories and produce AI-ready inventory packs.")
@@ -83,7 +88,7 @@ def reconcile(
 ) -> None:
     config = _load(config_path, outputs_dir)
     records = load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
-    records = maybe_reconcile(records, config)
+    records = maybe_reconcile(records, config, outputs_dir=outputs_dir, dry_run=dry_run)
     if dry_run:
         console.print(f"Dry run: would write reconciled inventory for {len(records)} repositories.")
         return
@@ -169,6 +174,27 @@ def brief(
     render_inventory(records, outputs_dir)
     render_agent_brief(records, queue, groups, outputs_dir)
     console.print(f"Wrote agent brief to {outputs_dir / 'agent_brief.md'}.")
+
+
+@app.command()
+def handoff(
+    config_path: ConfigOption = Path("repo_radar.yaml"),
+    outputs_dir: OutputsOption = Path("outputs"),
+    dry_run: DryRunOption = False,
+) -> None:
+    config = _load(config_path, outputs_dir)
+    records = load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
+    queue = load_queue(outputs_dir) or build_priority_queue(
+        records,
+        config.shortlist.token_budget,
+        config.shortlist.max_repos,
+    )
+    groups = render_groups(records, outputs_dir) if not dry_run else {"duplicates": []}
+    if dry_run:
+        console.print(f"Dry run: would write agent handoff for {len(records)} repositories.")
+        return
+    render_agent_handoff(records, queue, groups, outputs_dir)
+    console.print(f"Wrote agent handoff to {outputs_dir / 'agent_handoff.md'}.")
 
 
 @app.command(name="config-check")

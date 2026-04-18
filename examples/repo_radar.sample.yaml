@@ -43,6 +43,9 @@ github:
   enabled: true
   use_gh: true
   timeout_seconds: 10
+  cache_enabled: true
+  cache_path:
+  cache_ttl_seconds: 86400
 
 packer:
   backend: repomix

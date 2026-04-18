@@ -7,11 +7,17 @@ from repo_radar.classification import classify_repo
 from repo_radar.config import RadarConfig
 from repo_radar.discovery.local import LocalFilesystemAdapter
 from repo_radar.discovery.ssh import SSHSourceAdapter
+from repo_radar.duplicates import assign_duplicate_clusters
 from repo_radar.metadata import extract_local_metadata
 from repo_radar.models import PriorityQueueItem, RepoRecord
 from repo_radar.packers import create_packer, pack_repositories, pack_shortlisted_repos
-from repo_radar.reconciliation import reconcile_records
-from repo_radar.rendering import render_agent_brief, render_groups, render_inventory
+from repo_radar.reconciliation import GitHubCache, reconcile_records
+from repo_radar.rendering import (
+    render_agent_brief,
+    render_agent_handoff,
+    render_groups,
+    render_inventory,
+)
 from repo_radar.shortlist import build_priority_queue, render_priority_queue
 
 
@@ -40,7 +46,10 @@ def discover_inventory(config: RadarConfig, dry_run: bool = False) -> list[RepoR
                 project_type="git-only" if project.is_git else "repo-like",
             )
             records[(record.source_type, record.path)] = record
-    return sorted(records.values(), key=lambda record: (record.name or "", record.path))
+    clustered, _clusters = assign_duplicate_clusters(
+        sorted(records.values(), key=lambda record: (record.name or "", record.path))
+    )
+    return clustered
 
 
 def write_inventory_outputs(records: list[RepoRecord], outputs_dir: Path) -> dict[str, object]:
@@ -48,10 +57,18 @@ def write_inventory_outputs(records: list[RepoRecord], outputs_dir: Path) -> dic
     return render_groups(records, outputs_dir)
 
 
-def maybe_reconcile(records: list[RepoRecord], config: RadarConfig) -> list[RepoRecord]:
+def maybe_reconcile(
+    records: list[RepoRecord],
+    config: RadarConfig,
+    outputs_dir: Path | None = None,
+    dry_run: bool = False,
+) -> list[RepoRecord]:
     if not config.github.enabled:
         return records
-    return reconcile_records(records, config.github)
+    cache = _github_cache(config, outputs_dir or config.outputs_dir, read_only=dry_run)
+    reconciled = reconcile_records(records, config.github, cache=cache)
+    clustered, _clusters = assign_duplicate_clusters(reconciled)
+    return clustered
 
 
 def build_and_write_shortlist(
@@ -128,7 +145,7 @@ def run_scan(
     digest_limit: int | None = None,
 ) -> tuple[list[RepoRecord], list[PriorityQueueItem]]:
     records = discover_inventory(config, dry_run=dry_run)
-    records = maybe_reconcile(records, config)
+    records = maybe_reconcile(records, config, outputs_dir=outputs_dir, dry_run=dry_run)
     queue = build_priority_queue(
         records,
         token_budget=config.shortlist.token_budget,
@@ -143,3 +160,27 @@ def run_scan(
         run_full_pack(records, queue, config, outputs_dir, dry_run=False)
     render_agent_brief(records, queue, groups, outputs_dir)
     return records, queue
+
+
+def run_handoff(
+    records: list[RepoRecord],
+    queue: list[PriorityQueueItem],
+    outputs_dir: Path,
+) -> Path:
+    groups = render_groups(records, outputs_dir)
+    return render_agent_handoff(records, queue, groups, outputs_dir)
+
+
+def _github_cache(
+    config: RadarConfig,
+    outputs_dir: Path,
+    read_only: bool = False,
+) -> GitHubCache | None:
+    if not config.github.cache_enabled:
+        return None
+    cache_path = config.github.cache_path or (outputs_dir / ".cache" / "github_reconciliation.json")
+    return GitHubCache(
+        path=cache_path,
+        ttl_seconds=config.github.cache_ttl_seconds,
+        read_only=read_only,
+    )

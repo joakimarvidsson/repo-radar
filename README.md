@@ -36,7 +36,11 @@ inventory -> digest -> shortlist -> full pack -> agent brief
 - Reconcile GitHub remotes with the `gh` CLI when available and authenticated.
 - Detect likely orphan local repositories, remote mismatches, renamed repositories,
   and public/private visibility when GitHub allows it.
+- Cluster probable duplicates with explainable signals from remotes, manifests,
+  folder signatures, README hashes, and structural similarity.
+- Rank repositories with inspectable positive and negative scoring factors.
 - Generate JSON, Markdown, priority queues, compressed digests, full packs, and agent briefs.
+- Generate compact AI handoff notes for a coding agent or model.
 - Support dry runs for discovery and packing commands.
 - Use Repomix as the default AI-friendly packer backend.
 - Keep a backend seam for optional Code2Prompt support later.
@@ -129,6 +133,12 @@ Write an agent brief:
 repo-radar brief --config repo_radar.yaml
 ```
 
+Write a compact AI handoff:
+
+```bash
+repo-radar handoff --config repo_radar.yaml
+```
+
 Or run the staged flow in one command:
 
 ```bash
@@ -154,6 +164,7 @@ repo-radar doctor --config repo_radar.yaml
 - `outputs/repo_digests/`
 - `outputs/repo_fullpacks/`
 - `outputs/agent_brief.md`
+- `outputs/agent_handoff.md`
 
 Digest and full-pack directories also receive `pack_metadata.json` manifests with packer
 commands, success/failure counts, and per-repository result records.
@@ -188,6 +199,32 @@ the local remote identity matches GitHub, and whether a local repository looks o
 If `gh` is missing or unauthenticated, inventory still works. Reconciliation fields record
 the reason GitHub metadata could not be checked.
 
+GitHub lookups are cached by default under `outputs/.cache/github_reconciliation.json`.
+Set `github.cache_ttl_seconds` to control refresh cadence, or disable caching with:
+
+```yaml
+github:
+  cache_enabled: false
+```
+
+## Duplicate detection and scoring
+
+Duplicate detection is deterministic and explainable. Repo records can receive a
+`duplicate_cluster_id` and `duplicate_signals` when practical heuristics agree:
+
+- normalized Git remote URL match
+- same resolved local path discovered through different roots
+- same manifest/package name
+- same README content hash
+- same top-level folder signature
+- same basename with strong structural similarity
+
+Shortlist scoring writes a `score_breakdown` for every ranked repo in
+`outputs/repo_priority_queue.json`. Positive factors include maturity, recent activity,
+clean Git state, source/test/docs structure, classification confidence, and packability.
+Negative factors include duplicate penalties, GitHub drift, orphan remotes, stale repos,
+and incomplete project signals.
+
 ## SSH scanning
 
 SSH sources are optional and disabled by default. When enabled, the adapter runs read-only
@@ -213,6 +250,7 @@ uv sync
 uv run pytest
 uv run ruff check .
 uv run python -m compileall src tests
+uv run repo-radar handoff --config repo_radar.yaml
 ```
 
 ## Open-source roadmap

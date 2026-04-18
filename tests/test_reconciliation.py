@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from repo_radar.models import GitMetadata, RepoRecord
-from repo_radar.reconciliation import GitHubIdentity, parse_github_remote_url, reconcile_record
+from repo_radar.reconciliation import (
+    GitHubCache,
+    GitHubIdentity,
+    parse_github_remote_url,
+    reconcile_record,
+)
 
 
 class FakeGhClient:
@@ -79,3 +86,56 @@ def test_reconcile_record_notes_rename_or_drift():
     assert reconciled.github is not None
     assert reconciled.github.remote_matches is False
     assert "returned new/app" in reconciled.github.mismatch_reason
+
+
+def test_reconcile_record_uses_fresh_cache_without_querying_client(tmp_path):
+    identity = GitHubIdentity(host="github.com", owner="owner", name="app")
+    cache = GitHubCache(tmp_path / "github_cache.json", ttl_seconds=3600)
+    cache.set(
+        identity,
+        {
+            "nameWithOwner": "owner/app",
+            "visibility": "PRIVATE",
+            "url": "https://github.com/owner/app",
+            "sshUrl": "git@github.com:owner/app.git",
+            "defaultBranchRef": {"name": "main"},
+        },
+    )
+    record = RepoRecord(
+        path="/tmp/app",
+        name="app",
+        is_git=True,
+        git=GitMetadata(remotes={"origin": "git@github.com:owner/app.git"}),
+    )
+    client = FakeGhClient(payload=None)
+
+    reconciled = reconcile_record(record, client, cache=cache)
+
+    assert client.queries == []
+    assert reconciled.github is not None
+    assert reconciled.github.checked_with == "gh-cache"
+    assert reconciled.github.exists is True
+
+
+def test_reconcile_record_refreshes_stale_cache(tmp_path):
+    identity = GitHubIdentity(host="github.com", owner="owner", name="app")
+    cache = GitHubCache(tmp_path / "github_cache.json", ttl_seconds=1)
+    cache.set(
+        identity,
+        {"nameWithOwner": "owner/old", "visibility": "PRIVATE"},
+        checked_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    record = RepoRecord(
+        path="/tmp/app",
+        name="app",
+        is_git=True,
+        git=GitMetadata(remotes={"origin": "git@github.com:owner/app.git"}),
+    )
+    client = FakeGhClient(payload={"nameWithOwner": "owner/app", "visibility": "PUBLIC"})
+
+    reconciled = reconcile_record(record, client, cache=cache)
+
+    assert len(client.queries) == 1
+    assert reconciled.github is not None
+    assert reconciled.github.checked_with == "gh"
+    assert reconciled.github.visibility == "PUBLIC"

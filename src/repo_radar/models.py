@@ -53,6 +53,13 @@ class GitHubReconciliation(RadarBaseModel):
     error: str | None = None
 
 
+class DuplicateCluster(RadarBaseModel):
+    id: str
+    paths: list[str] = Field(default_factory=list)
+    names: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class RepoRecord(RadarBaseModel):
     path: str
     name: str | None = None
@@ -69,8 +76,14 @@ class RepoRecord(RadarBaseModel):
     estimated_size_bytes: int = 0
     key_directories: list[str] = Field(default_factory=list)
     project_type: str = "unknown"
+    classification_confidence: int = 0
     maturity_score: int = 0
     maturity_signals: list[str] = Field(default_factory=list)
+    manifest_names: list[str] = Field(default_factory=list)
+    readme_hash: str | None = None
+    top_level_signature: str | None = None
+    duplicate_cluster_id: str | None = None
+    duplicate_signals: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def fill_name(self) -> RepoRecord:
@@ -87,6 +100,10 @@ class PriorityQueueItem(RadarBaseModel):
     score: int
     estimated_tokens: int = 0
     reasons: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, dict[str, int]] = Field(
+        default_factory=lambda: {"positive": {}, "negative": {}}
+    )
+    classification_confidence: int = 0
     selected: bool = False
 
 

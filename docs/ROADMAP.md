@@ -2,9 +2,9 @@
 
 ## Near term
 
-- Expand GitHub reconciliation to batch requests and cache successful lookups.
-- Add richer duplicate detection using remote identity, normalized names, and manifest metadata.
-- Add richer CLI smoke checks after the command surface stabilizes.
+- Expand GitHub reconciliation to batch requests and smarter cache refresh policies.
+- Add richer duplicate detection using lockfile and dependency similarity.
+- Add richer CLI smoke checks for generated artifact shape.
 
 ## Packer backends
 
@@ -23,6 +23,7 @@
 - Add prompt templates for follow-up agent analysis.
 - Add token accounting based on actual Repomix output metadata where available.
 - Add priority strategies for maintenance, migration, documentation, and security review.
+- Add handoff profiles for maintenance, archival cleanup, and migration review.
 
 ## Open-source readiness
 

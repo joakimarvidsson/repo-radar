@@ -40,6 +40,7 @@ def classify_repo(record: RepoRecord) -> RepoRecord:
         updated.project_type = "repo-like"
 
     updated.maturity_score, updated.maturity_signals = _maturity(path, updated)
+    updated.classification_confidence = _classification_confidence(updated)
     return updated
 
 
@@ -90,3 +91,16 @@ def _recent_commit(record: RepoRecord) -> bool:
     except ValueError:
         return False
     return (datetime.now(UTC) - date).days <= 540
+
+
+def _classification_confidence(record: RepoRecord) -> int:
+    score = 20
+    if record.project_type not in {"unknown", "repo-like"}:
+        score += 30
+    if record.markers:
+        score += min(25, len(record.markers) * 5)
+    if record.primary_languages:
+        score += 10
+    if record.key_directories:
+        score += min(15, len(record.key_directories) * 5)
+    return min(score, 100)
