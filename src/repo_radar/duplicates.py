@@ -57,6 +57,10 @@ def assign_duplicate_clusters(
     def union(left: int, right: int, reason: str) -> None:
         if left == right:
             return
+        if _is_monorepo_related(updated[left], updated[right]):
+            return
+        if _is_weak_monorepo_subproject_match(updated[left], updated[right], reason):
+            return
         left_root = find(left)
         right_root = find(right)
         if left_root != right_root:
@@ -148,6 +152,8 @@ def _union_by_key(records, union, key_func, reason: str) -> None:
 
 def _remote_keys(record: RepoRecord) -> list[str]:
     if not record.git:
+        return []
+    if record.git.git_root and record.git.git_root != record.path:
         return []
     return sorted(
         key for url in record.git.remotes.values() if (key := normalize_remote_url(url)) is not None
@@ -287,3 +293,38 @@ def _canonical_score(record: RepoRecord) -> int:
 
 def _path_sort_key(record: RepoRecord) -> str:
     return "~" + record.path
+
+
+def _is_monorepo_related(left: RepoRecord, right: RepoRecord) -> bool:
+    if not left.git or not right.git or not left.git.git_root or not right.git.git_root:
+        return False
+    if left.git.git_root != right.git.git_root:
+        return False
+    if Path(left.path).resolve() == Path(right.path).resolve():
+        return False
+    return (
+        "MONOREPO_SUBPROJECT" in left.relationship_labels
+        or "MONOREPO_SUBPROJECT" in right.relationship_labels
+        or "MONOREPO_ROOT" in left.relationship_labels
+        or "MONOREPO_ROOT" in right.relationship_labels
+    )
+
+
+def _is_weak_monorepo_subproject_match(
+    left: RepoRecord,
+    right: RepoRecord,
+    reason: str,
+) -> bool:
+    if reason in {"normalized-remote", "manifest-name", "readme-hash", "readme-title"}:
+        return False
+    if "MONOREPO_SUBPROJECT" not in left.relationship_labels and (
+        "MONOREPO_SUBPROJECT" not in right.relationship_labels
+    ):
+        return False
+    return reason in {
+        "manifest-similarity",
+        "top-level-signature",
+        "normalized-basename",
+        "basename-structural-similarity",
+        "basename-variant",
+    }

@@ -24,6 +24,7 @@ def build_priority_queue(
             and item.estimated_tokens > 0
             and spent + item.estimated_tokens <= token_budget
             and not item.suppressed
+            and "CONTAINER_DIRECTORY" not in item.relationship_labels
         )
         item.rank = index
         item.selected = can_select
@@ -84,6 +85,10 @@ def _score_record(record: RepoRecord) -> PriorityQueueItem:
         _add(negative, "incomplete_penalty", -8)
     if record.suppressed:
         _add(negative, "noise_suppression_penalty", -250)
+    if "CONTAINER_DIRECTORY" in record.relationship_labels:
+        _add(negative, "container_directory_penalty", -150)
+    if "MONOREPO_SUBPROJECT" in record.relationship_labels:
+        _add(positive, "monorepo_subproject", 4)
 
     score = sum(positive.values()) + sum(negative.values())
     reasons = _top_reasons(positive, negative, record)
@@ -102,6 +107,7 @@ def _score_record(record: RepoRecord) -> PriorityQueueItem:
         reasons=reasons,
         score_breakdown={"positive": positive, "negative": negative},
         classification_confidence=record.classification_confidence,
+        relationship_labels=record.relationship_labels,
         noise_class=record.noise_class,
         suppressed=record.suppressed,
     )

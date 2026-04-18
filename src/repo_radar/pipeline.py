@@ -14,6 +14,7 @@ from repo_radar.noise import filter_noise
 from repo_radar.packers import create_packer, pack_repositories, pack_shortlisted_repos
 from repo_radar.recommendations import annotate_queue_with_recommendations, apply_recommendations
 from repo_radar.reconciliation import GitHubCache, reconcile_records
+from repo_radar.relationships import apply_project_relationships
 from repo_radar.rendering import (
     render_agent_brief,
     render_agent_handoff,
@@ -63,7 +64,8 @@ def discover_inventory(config: RadarConfig, dry_run: bool = False) -> list[RepoR
         broad_scan=config.broad_scan,
         include_noise=config.include_noise,
     )
-    clustered, _clusters = assign_duplicate_clusters(filtered)
+    related = apply_project_relationships(filtered)
+    clustered, _clusters = assign_duplicate_clusters(related)
     return clustered
 
 
@@ -84,7 +86,8 @@ def maybe_reconcile(
     reconcilable = [record for record in records if not record.suppressed]
     suppressed = [record for record in records if record.suppressed]
     reconciled = [*reconcile_records(reconcilable, config.github, cache=cache), *suppressed]
-    clustered, _clusters = assign_duplicate_clusters(reconciled)
+    related = apply_project_relationships(reconciled)
+    clustered, _clusters = assign_duplicate_clusters(related)
     return clustered
 
 

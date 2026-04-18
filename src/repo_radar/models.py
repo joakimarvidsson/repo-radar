@@ -28,6 +28,7 @@ class DiscoveredProject(RadarBaseModel):
 
 class GitMetadata(RadarBaseModel):
     remotes: dict[str, str] = Field(default_factory=dict)
+    git_root: str | None = None
     current_branch: str | None = None
     default_branch: str | None = None
     last_commit_date: str | None = None
@@ -92,6 +93,9 @@ class RepoRecord(RadarBaseModel):
     likely_canonical: bool = False
     recommendation_labels: list[str] = Field(default_factory=list)
     recommendation_reasons: list[str] = Field(default_factory=list)
+    relationship_labels: list[str] = Field(default_factory=list)
+    monorepo_root_path: str | None = None
+    monorepo_subproject_count: int = 0
     noise_class: str = "USER_PROJECT"
     noise_reasons: list[str] = Field(default_factory=list)
     suppressed: bool = False
@@ -117,6 +121,7 @@ class PriorityQueueItem(RadarBaseModel):
     classification_confidence: int = 0
     recommendation_labels: list[str] = Field(default_factory=list)
     recommendation_reasons: list[str] = Field(default_factory=list)
+    relationship_labels: list[str] = Field(default_factory=list)
     noise_class: str = "USER_PROJECT"
     suppressed: bool = False
     selected: bool = False

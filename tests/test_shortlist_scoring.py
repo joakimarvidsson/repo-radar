@@ -83,3 +83,31 @@ def test_shortlist_does_not_select_suppressed_noise():
     assert by_name["pkg"].selected is False
     assert by_name["pkg"].suppressed is True
     assert by_name["pkg"].score_breakdown["negative"]["noise_suppression_penalty"] < 0
+
+
+def test_shortlist_does_not_select_container_directories():
+    records = [
+        RepoRecord(
+            path="/workspace/Projects",
+            name="Projects",
+            maturity_score=0,
+            relationship_labels=["CONTAINER_DIRECTORY"],
+            file_count=100,
+            estimated_size_bytes=100_000,
+        ),
+        RepoRecord(
+            path="/workspace/Projects/app",
+            name="app",
+            maturity_score=60,
+            key_directories=["src"],
+            file_count=10,
+            estimated_size_bytes=10_000,
+        ),
+    ]
+
+    queue = build_priority_queue(records, token_budget=1_000_000, max_repos=5)
+    by_name = {item.name: item for item in queue}
+
+    assert by_name["Projects"].selected is False
+    assert by_name["Projects"].score_breakdown["negative"]["container_directory_penalty"] < 0
+    assert by_name["app"].selected is True

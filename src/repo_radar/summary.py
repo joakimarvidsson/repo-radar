@@ -15,6 +15,9 @@ class ScanSummary(BaseModel):
     merge_candidates: int = 0
     suppressed_noise: int = 0
     user_projects: int = 0
+    monorepo_roots: int = 0
+    monorepo_subprojects: int = 0
+    container_directories: int = 0
 
 
 def build_scan_summary(
@@ -46,6 +49,15 @@ def build_scan_summary(
         ),
         suppressed_noise=sum(1 for record in records if record.suppressed),
         user_projects=sum(1 for record in records if record.noise_class == "USER_PROJECT"),
+        monorepo_roots=sum(
+            1 for record in records if "MONOREPO_ROOT" in record.relationship_labels
+        ),
+        monorepo_subprojects=sum(
+            1 for record in records if "MONOREPO_SUBPROJECT" in record.relationship_labels
+        ),
+        container_directories=sum(
+            1 for record in records if "CONTAINER_DIRECTORY" in record.relationship_labels
+        ),
     )
 
 
@@ -62,5 +74,8 @@ def format_scan_summary(summary: ScanSummary) -> str:
             f"- merge candidates: {summary.merge_candidates}",
             f"- suppressed noise: {summary.suppressed_noise}",
             f"- likely user projects: {summary.user_projects}",
+            f"- monorepo roots: {summary.monorepo_roots}",
+            f"- monorepo subprojects: {summary.monorepo_subprojects}",
+            f"- container directories: {summary.container_directories}",
         ]
     )

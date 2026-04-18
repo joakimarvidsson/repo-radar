@@ -53,8 +53,19 @@ def _recommend(record: RepoRecord, score: int | None) -> RepoRecord:
         updated.recommendation_reasons = reasons
         return updated
 
+    if "CONTAINER_DIRECTORY" in updated.relationship_labels:
+        add("CONTAINER_DIRECTORY", "Container folder; inspect child projects instead")
+        updated.recommendation_labels = labels
+        updated.recommendation_reasons = reasons
+        return updated
+
+    if "MONOREPO_SUBPROJECT" in updated.relationship_labels:
+        add("INSPECT", f"Subproject under monorepo root {updated.monorepo_root_path}")
+
     if updated.duplicate_cluster_id:
-        if updated.likely_canonical:
+        if "MONOREPO_SUBPROJECT" in updated.relationship_labels:
+            pass
+        elif updated.likely_canonical:
             add("KEEP", f"Likely canonical for {updated.duplicate_cluster_id}")
         else:
             canonical = updated.duplicate_canonical_path or "cluster canonical"

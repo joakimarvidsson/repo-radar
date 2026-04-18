@@ -31,6 +31,7 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
     duplicate_clusters: dict[str, list[RepoRecord]] = defaultdict(list)
     action_groups: dict[str, list[RepoRecord]] = defaultdict(list)
     noise_groups: dict[str, list[RepoRecord]] = defaultdict(list)
+    monorepo_children: dict[str, list[RepoRecord]] = defaultdict(list)
 
     for record in records:
         type_groups[record.project_type].append(record)
@@ -42,6 +43,8 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
         for label in record.recommendation_labels:
             action_groups[label].append(record)
         noise_groups[record.noise_class].append(record)
+        if "MONOREPO_SUBPROJECT" in record.relationship_labels and record.monorepo_root_path:
+            monorepo_children[record.monorepo_root_path].append(record)
 
     for project_type, group in sorted(type_groups.items()):
         by_type[project_type] = {
@@ -85,6 +88,17 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
         if record.github
         and (record.github.orphan_candidate or record.github.remote_matches is False)
     )
+    container_paths = sorted(
+        record.path for record in records if "CONTAINER_DIRECTORY" in record.relationship_labels
+    )
+    monorepo_families = [
+        {
+            "root_path": root,
+            "subproject_count": len(children),
+            "subprojects": sorted(child.path for child in children),
+        }
+        for root, children in sorted(monorepo_children.items())
+    ]
 
     payload: dict[str, object] = {
         "schema_version": "1.1",
@@ -105,6 +119,8 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
         "suppressed_noise": {
             "count": sum(1 for record in records if record.suppressed),
         },
+        "monorepo_families": monorepo_families,
+        "container_directories": {"count": len(container_paths), "paths": container_paths},
     }
     (outputs_dir / "repo_groups.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -190,6 +206,15 @@ def render_agent_brief(
             lines.append(f"- {record.name} at `{record.path}`: {reasons}")
     else:
         lines.append("- No merge candidates were detected.")
+
+    lines.extend(["", "## Monorepo families", ""])
+    monorepo_roots = [record for record in records if "MONOREPO_ROOT" in record.relationship_labels]
+    if monorepo_roots:
+        for record in sorted(monorepo_roots, key=lambda item: item.path)[:10]:
+            count = record.monorepo_subproject_count
+            lines.append(f"- {record.name} at `{record.path}`: {count} subprojects")
+    else:
+        lines.append("- No monorepo families were detected.")
 
     lines.extend(["", "## Suppressed noise summary", ""])
     if noise_counts:
@@ -288,6 +313,14 @@ def render_agent_handoff(
     else:
         lines.append("- None detected.")
 
+    lines.extend(["", "## Monorepo families"])
+    monorepo_roots = [record for record in records if "MONOREPO_ROOT" in record.relationship_labels]
+    if monorepo_roots:
+        for record in sorted(monorepo_roots, key=lambda item: item.path)[:6]:
+            lines.append(f"- `{record.path}` with {record.monorepo_subproject_count} subprojects")
+    else:
+        lines.append("- None detected.")
+
     lines.extend(["", "## Suppressed noise summary"])
     if noise_counts:
         for label, count in noise_counts.items():
@@ -307,10 +340,10 @@ def render_agent_handoff(
         [
             "",
             "## Recommended next commands",
-            "- `repo-radar digest --config repo_radar.yaml`",
-            "- `repo-radar shortlist --config repo_radar.yaml`",
-            "- `repo-radar pack --config repo_radar.yaml`",
-            "- `repo-radar brief --config repo_radar.yaml`",
+            "- `repo-radar digest`",
+            "- `repo-radar shortlist`",
+            "- `repo-radar pack`",
+            "- `repo-radar brief`",
         ]
     )
 
@@ -354,6 +387,24 @@ def _inventory_markdown(records: list[RepoRecord]) -> str:
             lines.append(f"- {record.name}: `{record.path}`")
     else:
         lines.append("- None identified.")
+    monorepo_roots = [record for record in records if "MONOREPO_ROOT" in record.relationship_labels]
+    lines.extend(["", "## Monorepo families", ""])
+    if monorepo_roots:
+        for record in sorted(monorepo_roots, key=lambda item: item.path)[:20]:
+            lines.append(
+                f"- {record.name}: `{record.path}` ({record.monorepo_subproject_count} subprojects)"
+            )
+    else:
+        lines.append("- None detected.")
+    container_dirs = [
+        record for record in records if "CONTAINER_DIRECTORY" in record.relationship_labels
+    ]
+    lines.extend(["", "## Container directories", ""])
+    if container_dirs:
+        for record in sorted(container_dirs, key=lambda item: item.path)[:20]:
+            lines.append(f"- {record.name}: `{record.path}`")
+    else:
+        lines.append("- None detected.")
     return "\n".join(lines) + "\n"
 
 

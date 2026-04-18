@@ -7,6 +7,7 @@
 - Add dependency/lockfile similarity to duplicate detection.
 - Add configurable recommendation weights.
 - Add configurable noise suppression rules and per-project allowlists.
+- Add deeper monorepo family summaries for package/app ownership.
 - Add richer CLI smoke checks for generated artifact shape.
 
 ## Packer backends

@@ -50,6 +50,37 @@ def test_render_inventory_groups_and_brief(tmp_path):
     assert "Inspect first" in brief_path.read_text(encoding="utf-8")
 
 
+def test_render_groups_includes_monorepo_families_and_containers(tmp_path):
+    records = [
+        RepoRecord(
+            path="/workspace/mono",
+            name="mono",
+            relationship_labels=["MONOREPO_ROOT"],
+        ),
+        RepoRecord(
+            path="/workspace/mono/apps/api",
+            name="api",
+            relationship_labels=["MONOREPO_SUBPROJECT"],
+            monorepo_root_path="/workspace/mono",
+        ),
+        RepoRecord(
+            path="/workspace/Projects",
+            name="Projects",
+            relationship_labels=["CONTAINER_DIRECTORY"],
+        ),
+    ]
+
+    groups = render_groups(records, tmp_path)
+    inventory_md = tmp_path / "repo_inventory.md"
+    render_inventory(records, tmp_path)
+    content = inventory_md.read_text(encoding="utf-8")
+
+    assert groups["monorepo_families"][0]["root_path"] == "/workspace/mono"
+    assert groups["container_directories"]["count"] == 1
+    assert "Monorepo families" in content
+    assert "Container directories" in content
+
+
 def test_repomix_packer_dry_run_uses_npx_fallback_and_compress(monkeypatch, tmp_path):
     def fake_which(name: str):
         return None if name == "repomix" else f"/usr/bin/{name}"

@@ -124,3 +124,59 @@ def test_duplicate_clustering_detects_suffix_variants_and_readme_titles():
     assert "readme-title" in clusters[0].reasons
     assert clustered[0].likely_canonical is True
     assert clustered[1].likely_canonical is False
+
+
+def test_duplicate_clustering_skips_related_monorepo_siblings_with_same_remote():
+    records = [
+        RepoRecord(
+            path="/workspace/mono/apps/api",
+            name="api",
+            git=GitMetadata(
+                git_root="/workspace/mono", remotes={"origin": "git@example.com:org/mono.git"}
+            ),
+            relationship_labels=["MONOREPO_SUBPROJECT"],
+            monorepo_root_path="/workspace/mono",
+            markers=["package.json", "src/"],
+            key_directories=["src"],
+        ),
+        RepoRecord(
+            path="/workspace/mono/apps/web",
+            name="web",
+            git=GitMetadata(
+                git_root="/workspace/mono", remotes={"origin": "git@example.com:org/mono.git"}
+            ),
+            relationship_labels=["MONOREPO_SUBPROJECT"],
+            monorepo_root_path="/workspace/mono",
+            markers=["package.json", "src/"],
+            key_directories=["src"],
+        ),
+    ]
+
+    clustered, clusters = assign_duplicate_clusters(records)
+
+    assert clusters == []
+    assert all(record.duplicate_cluster_id is None for record in clustered)
+
+
+def test_duplicate_clustering_does_not_group_monorepo_subproject_on_weak_manifest_similarity():
+    records = [
+        RepoRecord(
+            path="/workspace/mono/apps/api",
+            name="api",
+            relationship_labels=["MONOREPO_SUBPROJECT"],
+            monorepo_root_path="/workspace/mono",
+            markers=["package.json"],
+            git=GitMetadata(git_root="/workspace/mono"),
+        ),
+        RepoRecord(
+            path="/workspace/other/example",
+            name="example",
+            markers=["package.json"],
+            git=GitMetadata(git_root="/workspace/other"),
+        ),
+    ]
+
+    clustered, clusters = assign_duplicate_clusters(records)
+
+    assert clusters == []
+    assert all(record.duplicate_cluster_id is None for record in clustered)

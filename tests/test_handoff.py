@@ -70,6 +70,22 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
     assert len(content.splitlines()) < 80
 
 
+def test_render_agent_handoff_uses_zero_config_next_commands(tmp_path):
+    path = render_agent_handoff(
+        records=[RepoRecord(path="/workspace/app", name="app")],
+        queue=[],
+        groups={"duplicates": []},
+        outputs_dir=tmp_path,
+    )
+    content = path.read_text(encoding="utf-8")
+
+    assert "repo-radar digest --config" not in content
+    assert "`repo-radar digest`" in content
+    assert "`repo-radar shortlist`" in content
+    assert "`repo-radar pack`" in content
+    assert "`repo-radar brief`" in content
+
+
 def test_render_agent_handoff_mentions_effective_sources(tmp_path):
     path = render_agent_handoff(
         records=[RepoRecord(path="/workspace/a", name="a")],

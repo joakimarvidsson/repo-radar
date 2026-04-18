@@ -43,6 +43,8 @@ inventory -> digest -> shortlist -> full pack -> agent brief
   `MERGE_CANDIDATE`, `DUPLICATE_OF`, and `NEEDS_RECONCILIATION`.
 - Suppress noisy broad-scan results such as package caches, editor extensions,
   notebook checkpoints, generated folders, and plugin marketplaces by default.
+- Distinguish monorepo roots, monorepo subprojects, standalone projects, and
+  container directories so nested apps are not mistaken for duplicates.
 - Generate JSON, Markdown, priority queues, compressed digests, full packs, and agent briefs.
 - Generate compact AI handoff notes for a coding agent or model.
 - Support dry runs for discovery and packing commands.
@@ -299,6 +301,16 @@ Rendered inventory, brief, handoff, and groups outputs include action-oriented
 recommendation labels so the result is not just a list of repositories. The grouped views
 highlight inspect-first repos, duplicate clusters, canonical repos, merge candidates,
 archive candidates, orphan local repos, and repositories needing reconciliation.
+
+Monorepo relationships are handled separately from duplicate clusters. A parent repo with
+`apps/`, `packages/`, `services/`, `examples/`, or similar child manifests can be labeled
+`MONOREPO_ROOT`, while nested projects become `MONOREPO_SUBPROJECT`. Those subprojects are
+not marked as `DUPLICATE_OF` or `MERGE_CANDIDATE` just because they share the same Git
+remote or similar manifests.
+
+Broad container directories such as a home directory, `Projects`, `Documents`, or
+`My Drive` can be labeled `CONTAINER_DIRECTORY`; they are deprioritized so the handoff
+points at real child projects instead of the folder that contains them.
 
 ## Noise suppression
 
