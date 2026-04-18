@@ -52,3 +52,51 @@ def test_cli_scan_dry_run_does_not_write_outputs(tmp_path):
     assert result.exit_code == 0, result.output
     assert "Dry run" in result.output
     assert not (outputs / "repo_inventory.json").exists()
+
+
+def test_cli_config_check_reports_valid_config(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text(
+        f"local_roots:\n  - {project.as_posix()}\ngithub:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["config-check", "--config", str(config)])
+
+    assert result.exit_code == 0, result.output
+    assert "Config OK" in result.output
+    assert str(project) in result.output
+
+
+def test_cli_config_check_fails_for_missing_local_root(tmp_path):
+    missing = tmp_path / "missing"
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text(
+        f"local_roots:\n  - {missing.as_posix()}\ngithub:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["config-check", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "does not exist" in result.output
+
+
+def test_cli_doctor_reports_packer_status(monkeypatch, tmp_path):
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: false\n", encoding="utf-8")
+
+    def fake_which(name: str):
+        if name == "repomix":
+            return "/usr/local/bin/repomix"
+        return None
+
+    monkeypatch.setattr("repo_radar.packers.shutil.which", fake_which)
+
+    result = CliRunner().invoke(app, ["doctor", "--config", str(config)])
+
+    assert result.exit_code == 0, result.output
+    assert "repomix" in result.output
+    assert "available" in result.output

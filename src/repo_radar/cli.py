@@ -6,7 +6,8 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from repo_radar.config import load_config
+from repo_radar.config import load_config, validate_config
+from repo_radar.packers import get_packer_status
 from repo_radar.pipeline import (
     discover_inventory,
     load_inventory,
@@ -21,7 +22,7 @@ from repo_radar.rendering import render_agent_brief, render_groups, render_inven
 from repo_radar.shortlist import build_priority_queue, render_priority_queue
 
 app = typer.Typer(help="Discover repositories and produce AI-ready inventory packs.")
-console = Console()
+console = Console(soft_wrap=True)
 
 
 ConfigOption = Annotated[Path, typer.Option("--config", "-c", help="Path to repo_radar.yaml.")]
@@ -168,3 +169,51 @@ def brief(
     render_inventory(records, outputs_dir)
     render_agent_brief(records, queue, groups, outputs_dir)
     console.print(f"Wrote agent brief to {outputs_dir / 'agent_brief.md'}.")
+
+
+@app.command(name="config-check")
+def config_check(
+    config_path: ConfigOption = Path("repo_radar.yaml"),
+) -> None:
+    report = validate_config(config_path)
+    if report.ok:
+        console.print(f"Config OK: {report.config_path}")
+        if report.local_roots:
+            console.print("Local roots:")
+            for root in report.local_roots:
+                console.print(f"- {root}")
+        if report.warnings:
+            console.print("Warnings:")
+            for warning in report.warnings:
+                console.print(f"- {warning}")
+        return
+
+    console.print(f"Config invalid: {report.config_path}")
+    for error in report.errors:
+        console.print(f"- {error}")
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def doctor(
+    config_path: ConfigOption = Path("repo_radar.yaml"),
+) -> None:
+    config_report = validate_config(config_path)
+    config = load_config(config_path) if Path(config_path).exists() else None
+    packer_status = get_packer_status(config.packer if config else load_config().packer)
+
+    if config_report.ok:
+        console.print("config: ok")
+    else:
+        console.print("config: invalid")
+        for error in config_report.errors:
+            console.print(f"- {error}")
+
+    packer_word = "available" if packer_status.available else "unavailable"
+    console.print(f"packer: {packer_status.backend} {packer_word}")
+    console.print(f"- {packer_status.message}")
+    if packer_status.command:
+        console.print(f"- command: {' '.join(packer_status.command)}")
+
+    if not config_report.ok or not packer_status.available:
+        raise typer.Exit(code=1)

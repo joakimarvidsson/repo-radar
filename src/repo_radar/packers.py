@@ -6,8 +6,18 @@ import subprocess
 from pathlib import Path
 from typing import Protocol
 
+from pydantic import BaseModel, Field
+
 from repo_radar.config import PackerSettings
 from repo_radar.models import PackerResult, PriorityQueueItem, RepoRecord
+
+
+class PackerStatus(BaseModel):
+    backend: str
+    available: bool
+    executable: str | None = None
+    command: list[str] = Field(default_factory=list)
+    message: str
 
 
 class PackerBackend(Protocol):
@@ -72,13 +82,7 @@ class RepomixPacker:
         )
 
     def _base_command(self) -> list[str]:
-        if self.settings.command:
-            return shlex.split(self.settings.command)
-        if shutil.which("repomix"):
-            return ["repomix"]
-        if shutil.which("npx"):
-            return ["npx", "--yes", "repomix@latest"]
-        return ["repomix"]
+        return get_packer_status(self.settings).command or ["repomix"]
 
     def _command(self, output_path: Path, compressed: bool) -> list[str]:
         command = [
@@ -169,6 +173,53 @@ def create_packer(settings: PackerSettings) -> PackerBackend:
     if settings.backend == "code2prompt":
         return Code2PromptPacker()
     return RepomixPacker(settings)
+
+
+def get_packer_status(settings: PackerSettings) -> PackerStatus:
+    if settings.backend == "code2prompt":
+        return PackerStatus(
+            backend="code2prompt",
+            available=False,
+            message="Code2Prompt backend is reserved for future support",
+        )
+    if settings.command:
+        command = shlex.split(settings.command)
+        executable = command[0] if command else None
+        available = bool(executable and shutil.which(executable))
+        return PackerStatus(
+            backend="repomix",
+            available=available,
+            executable=executable,
+            command=command,
+            message=(
+                f"Configured packer command is available: {executable}"
+                if available
+                else f"Configured packer command was not found: {executable}"
+            ),
+        )
+    if shutil.which("repomix"):
+        return PackerStatus(
+            backend="repomix",
+            available=True,
+            executable="repomix",
+            command=["repomix"],
+            message="repomix is available",
+        )
+    if shutil.which("npx"):
+        return PackerStatus(
+            backend="repomix",
+            available=True,
+            executable="npx",
+            command=["npx", "--yes", "repomix@latest"],
+            message="repomix will run through npx",
+        )
+    return PackerStatus(
+        backend="repomix",
+        available=False,
+        executable=None,
+        command=[],
+        message="Install repomix or npx to enable digest and full pack generation",
+    )
 
 
 def _safe_name(name: str) -> str:

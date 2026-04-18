@@ -2,11 +2,10 @@
 
 ## Near term
 
-- Add CI for lint, tests, packaging, and CLI smoke checks.
 - Expand GitHub reconciliation to batch requests and cache successful lookups.
 - Add richer duplicate detection using remote identity, normalized names, and manifest metadata.
 - Store packer run metadata beside digest and full pack outputs.
-- Add a `repo-radar config validate` command.
+- Add CLI smoke checks to CI after the command surface stabilizes.
 
 ## Packer backends
 

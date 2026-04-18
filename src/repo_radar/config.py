@@ -116,3 +116,65 @@ def load_config(path: Path | str = Path("repo_radar.yaml")) -> RadarConfig:
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     return RadarConfig.model_validate(raw)
+
+
+class ConfigValidationReport(BaseModel):
+    ok: bool
+    config_path: str
+    local_roots: list[str] = Field(default_factory=list)
+    ssh_sources: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+def validate_config(path: Path | str = Path("repo_radar.yaml")) -> ConfigValidationReport:
+    config_path = Path(path)
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not config_path.exists():
+        return ConfigValidationReport(
+            ok=False,
+            config_path=str(config_path),
+            errors=[f"Config file does not exist: {config_path}"],
+        )
+
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        return ConfigValidationReport(
+            ok=False,
+            config_path=str(config_path),
+            errors=[f"Config could not be parsed: {exc}"],
+        )
+
+    local_roots: list[str] = []
+    for source in config.iter_local_sources():
+        if not source.enabled:
+            continue
+        for root in source.roots:
+            expanded = root.expanduser()
+            local_roots.append(str(expanded))
+            if not expanded.exists():
+                errors.append(f"Local root does not exist: {expanded}")
+            elif not expanded.is_dir():
+                errors.append(f"Local root is not a directory: {expanded}")
+
+    ssh_sources = [source.name for source in config.ssh_sources if source.enabled]
+    for source in config.ssh_sources:
+        if source.enabled and not source.roots:
+            errors.append(f"SSH source has no roots: {source.name}")
+        if not source.enabled:
+            warnings.append(f"SSH source disabled: {source.name}")
+
+    if not config.packer.security_check:
+        warnings.append("Repomix security checks are disabled")
+
+    return ConfigValidationReport(
+        ok=not errors,
+        config_path=str(config_path),
+        local_roots=local_roots,
+        ssh_sources=ssh_sources,
+        errors=errors,
+        warnings=warnings,
+    )

@@ -261,6 +261,12 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -270,10 +276,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rich", specifier = ">=13.7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "typer", specifier = ">=0.12" },
 ]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [

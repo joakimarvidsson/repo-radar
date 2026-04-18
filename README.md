@@ -136,6 +136,13 @@ repo-radar scan --config repo_radar.yaml
 repo-radar scan --config repo_radar.yaml --pack
 ```
 
+Validate configuration and local tool availability:
+
+```bash
+repo-radar config-check --config repo_radar.yaml
+repo-radar doctor --config repo_radar.yaml
+```
+
 ## Outputs
 
 `repo-radar` writes:
