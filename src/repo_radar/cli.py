@@ -18,6 +18,7 @@ from repo_radar.pipeline import (
     run_scan,
     write_inventory_outputs,
 )
+from repo_radar.recommendations import annotate_queue_with_recommendations, apply_recommendations
 from repo_radar.rendering import (
     render_agent_brief,
     render_agent_handoff,
@@ -26,6 +27,7 @@ from repo_radar.rendering import (
 )
 from repo_radar.runtime import RuntimeContext, persist_runtime_context, resolve_runtime_context
 from repo_radar.shortlist import build_priority_queue, render_priority_queue
+from repo_radar.summary import build_scan_summary, format_scan_summary
 
 app = typer.Typer(help="Discover repositories and produce AI-ready inventory packs.")
 console = Console(soft_wrap=True)
@@ -98,6 +100,10 @@ def _print_effective_sources(context: RuntimeContext) -> None:
         console.print("warnings:")
         for warning in context.warnings:
             console.print(f"- {warning}")
+    excludes = context.source_summary().get("effective_excludes") or []
+    if isinstance(excludes, list) and excludes:
+        console.print("effective excludes:")
+        console.print("- " + ", ".join(str(item) for item in excludes[:20]))
 
 
 def _remember(context: RuntimeContext, dry_run: bool) -> None:
@@ -133,11 +139,13 @@ def scan(
     _remember(context, dry_run)
     if dry_run:
         selected = sum(1 for item in queue if item.selected)
+        console.print(format_scan_summary(build_scan_summary(records, queue)))
         console.print(
             f"Dry run: found {len(records)} repositories; "
             f"would select {selected} for first inspection."
         )
         return
+    console.print(format_scan_summary(build_scan_summary(records, queue)))
     console.print(f"Wrote staged outputs for {len(records)} repositories to {outputs_dir}.")
 
 
@@ -155,10 +163,13 @@ def inventory(
     _print_effective_sources(context)
     records = discover_inventory(context.config, dry_run=dry_run)
     if dry_run:
+        console.print(format_scan_summary(build_scan_summary(records)))
         console.print(f"Dry run: would write inventory for {len(records)} repositories.")
         return
+    records = apply_recommendations(records)
     write_inventory_outputs(records, outputs_dir)
     _remember(context, dry_run)
+    console.print(format_scan_summary(build_scan_summary(records)))
     console.print(f"Wrote inventory for {len(records)} repositories to {outputs_dir}.")
 
 
@@ -177,8 +188,10 @@ def reconcile(
     records = load_inventory(outputs_dir) or discover_inventory(context.config, dry_run=dry_run)
     records = maybe_reconcile(records, context.config, outputs_dir=outputs_dir, dry_run=dry_run)
     if dry_run:
+        console.print(format_scan_summary(build_scan_summary(records)))
         console.print(f"Dry run: would write reconciled inventory for {len(records)} repositories.")
         return
+    records = apply_recommendations(records)
     write_inventory_outputs(records, outputs_dir)
     _remember(context, dry_run)
     console.print(f"Wrote reconciled inventory for {len(records)} repositories.")
@@ -217,6 +230,8 @@ def shortlist(
         config.shortlist.max_repos = limit
     records = load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
     queue = build_priority_queue(records, config.shortlist.token_budget, config.shortlist.max_repos)
+    records = apply_recommendations(records, {item.path: item.score for item in queue})
+    queue = annotate_queue_with_recommendations(queue, records)
     if dry_run:
         console.print(f"Dry run: would write shortlist with {len(queue)} ranked repositories.")
         return
@@ -240,6 +255,8 @@ def pack_command(
         config.shortlist.token_budget,
         config.shortlist.max_repos,
     )
+    records = apply_recommendations(records, {item.path: item.score for item in queue})
+    queue = annotate_queue_with_recommendations(queue, records)
     results = run_full_pack(records, queue, config, outputs_dir, dry_run=dry_run)
     console.print(f"{'Dry run: would create' if dry_run else 'Created'} {len(results)} full packs.")
 
@@ -267,6 +284,9 @@ def brief(
     if dry_run:
         console.print(f"Dry run: would write agent brief for {len(records)} repositories.")
         return
+    records = apply_recommendations(records, {item.path: item.score for item in queue})
+    queue = annotate_queue_with_recommendations(queue, records)
+    groups = render_groups(records, outputs_dir)
     render_inventory(records, outputs_dir)
     render_agent_brief(records, queue, groups, outputs_dir, source_summary=context.source_summary())
     _remember(context, dry_run)
@@ -294,8 +314,12 @@ def handoff(
     )
     groups = render_groups(records, outputs_dir) if not dry_run else {"duplicates": []}
     if dry_run:
+        console.print(format_scan_summary(build_scan_summary(records, queue)))
         console.print(f"Dry run: would write agent handoff for {len(records)} repositories.")
         return
+    records = apply_recommendations(records, {item.path: item.score for item in queue})
+    queue = annotate_queue_with_recommendations(queue, records)
+    groups = render_groups(records, outputs_dir)
     render_agent_handoff(
         records,
         queue,
@@ -304,6 +328,7 @@ def handoff(
         source_summary=context.source_summary(),
     )
     _remember(context, dry_run)
+    console.print(format_scan_summary(build_scan_summary(records, queue)))
     console.print(f"Wrote agent handoff to {outputs_dir / 'agent_handoff.md'}.")
 
 

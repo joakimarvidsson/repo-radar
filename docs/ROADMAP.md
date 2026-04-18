@@ -4,7 +4,8 @@
 
 - Add a `state clear` or `state show` command for runtime state inspection.
 - Expand GitHub reconciliation to batch requests and smarter cache refresh policies.
-- Add richer duplicate detection using lockfile and dependency similarity.
+- Add dependency/lockfile similarity to duplicate detection.
+- Add configurable recommendation weights.
 - Add richer CLI smoke checks for generated artifact shape.
 
 ## Packer backends
@@ -25,6 +26,7 @@
 - Add token accounting based on actual Repomix output metadata where available.
 - Add priority strategies for maintenance, migration, documentation, and security review.
 - Add handoff profiles for maintenance, archival cleanup, and migration review.
+- Add machine-readable recommendation summaries for downstream agents.
 
 ## Open-source readiness
 

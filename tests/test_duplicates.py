@@ -56,6 +56,11 @@ def test_duplicate_clustering_uses_remote_manifest_and_readme_signals():
     assert "manifest-name" in clusters[0].reasons
     assert "readme-hash" in clusters[0].reasons
     assert "normalized-remote" in clustered[0].duplicate_signals
+    assert clusters[0].confidence >= 90
+    assert clusters[0].canonical_path == "/workspace/one/repo"
+    assert clustered[0].likely_canonical is True
+    assert clustered[1].likely_canonical is False
+    assert clustered[1].duplicate_confidence == clusters[0].confidence
 
 
 def test_duplicate_clustering_detects_structural_similarity_for_same_basename():
@@ -81,3 +86,41 @@ def test_duplicate_clustering_detects_structural_similarity_for_same_basename():
     assert len(clusters) == 1
     assert {record.duplicate_cluster_id for record in clustered} == {"dup-001"}
     assert "basename-structural-similarity" in clusters[0].reasons
+
+
+def test_duplicate_clustering_detects_suffix_variants_and_readme_titles():
+    records = [
+        RepoRecord(
+            path="/workspace/service",
+            name="service",
+            project_type="node",
+            maturity_score=80,
+            classification_confidence=90,
+            markers=["package.json", "README.md", "src/"],
+            key_directories=["src"],
+            manifest_names=["service"],
+            readme_title="Service",
+            top_level_signature="README.md|package.json|src",
+        ),
+        RepoRecord(
+            path="/workspace/service-old",
+            name="service-old",
+            project_type="node",
+            maturity_score=30,
+            classification_confidence=80,
+            markers=["package.json", "README.md", "src/"],
+            key_directories=["src"],
+            manifest_names=["service"],
+            readme_title="Service",
+            top_level_signature="README.md|package.json|src",
+        ),
+    ]
+
+    clustered, clusters = assign_duplicate_clusters(records)
+
+    assert len(clusters) == 1
+    assert clusters[0].canonical_path == "/workspace/service"
+    assert "basename-variant" in clusters[0].reasons
+    assert "readme-title" in clusters[0].reasons
+    assert clustered[0].likely_canonical is True
+    assert clustered[1].likely_canonical is False

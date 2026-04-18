@@ -192,3 +192,22 @@ def test_cli_handoff_runs_without_config(monkeypatch, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert handoff_exists
+
+
+def test_cli_scan_dry_run_prints_summary_and_effective_excludes(monkeypatch, tmp_path):
+    state_path = tmp_path / "state.json"
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (project / "package.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("REPO_RADAR_STATE_PATH", str(state_path))
+    monkeypatch.setenv("HOME", str(home))
+
+    result = CliRunner().invoke(app, ["scan", "--root", str(home), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "summary:" in result.output
+    assert "total discovered:" in result.output
+    assert "duplicate clusters:" in result.output
+    assert "effective excludes:" in result.output
+    assert "Downloads" in result.output

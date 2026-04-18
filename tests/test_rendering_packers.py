@@ -12,10 +12,22 @@ from repo_radar.shortlist import build_priority_queue
 def test_render_inventory_groups_and_brief(tmp_path):
     records = [
         RepoRecord(
-            path="/workspace/a", name="a", project_type="python", maturity_score=80, file_count=10
+            path="/workspace/a",
+            name="a",
+            project_type="python",
+            maturity_score=80,
+            file_count=10,
+            recommendation_labels=["KEEP"],
+            likely_canonical=True,
         ),
         RepoRecord(
-            path="/workspace/b", name="b", project_type="node", maturity_score=50, file_count=5
+            path="/workspace/b",
+            name="b",
+            project_type="node",
+            maturity_score=50,
+            file_count=5,
+            duplicate_cluster_id="dup-001",
+            recommendation_labels=["DUPLICATE_OF", "MERGE_CANDIDATE"],
         ),
     ]
     outputs = tmp_path / "outputs"
@@ -28,7 +40,13 @@ def test_render_inventory_groups_and_brief(tmp_path):
     inventory = json.loads((outputs / "repo_inventory.json").read_text(encoding="utf-8"))
     assert inventory["repositories"][0]["name"] == "a"
     assert "python" in (outputs / "repo_inventory.md").read_text(encoding="utf-8")
+    assert "## Action Groups" in (outputs / "repo_inventory.md").read_text(encoding="utf-8")
+    assert "Likely primary / canonical repos" in (outputs / "repo_inventory.md").read_text(
+        encoding="utf-8"
+    )
     assert groups["by_project_type"]["python"]["count"] == 1
+    assert groups["action_groups"]["MERGE_CANDIDATE"]["count"] == 1
+    assert groups["canonical_repos"]["count"] == 1
     assert "Inspect first" in brief_path.read_text(encoding="utf-8")
 
 

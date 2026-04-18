@@ -37,6 +37,7 @@ DEFAULT_SKIP_DIRS = {
     ".hg",
     ".svn",
     ".venv",
+    ".cache",
     "__pycache__",
     ".mypy_cache",
     ".pytest_cache",
@@ -46,6 +47,15 @@ DEFAULT_SKIP_DIRS = {
     "build",
     "target",
     ".tox",
+    "Library",
+    "Downloads",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Applications",
+    "Trash",
+    ".Trash",
+    "outputs",
 }
 
 

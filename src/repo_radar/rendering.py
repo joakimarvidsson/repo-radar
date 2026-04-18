@@ -29,6 +29,7 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
     name_groups: dict[str, list[RepoRecord]] = defaultdict(list)
     github_groups: dict[str, list[RepoRecord]] = defaultdict(list)
     duplicate_clusters: dict[str, list[RepoRecord]] = defaultdict(list)
+    action_groups: dict[str, list[RepoRecord]] = defaultdict(list)
 
     for record in records:
         type_groups[record.project_type].append(record)
@@ -37,6 +38,8 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
             github_groups[record.github.github_repo.lower()].append(record)
         if record.duplicate_cluster_id:
             duplicate_clusters[record.duplicate_cluster_id].append(record)
+        for label in record.recommendation_labels:
+            action_groups[label].append(record)
 
     for project_type, group in sorted(type_groups.items()):
         by_type[project_type] = {
@@ -58,15 +61,42 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
             "names": sorted({record.name or Path(record.path).name for record in group}),
             "paths": sorted(record.path for record in group),
             "reasons": sorted({signal for record in group for signal in record.duplicate_signals}),
+            "confidence": max((record.duplicate_confidence for record in group), default=0),
+            "canonical_path": next(
+                (record.path for record in group if record.likely_canonical),
+                None,
+            ),
         }
         for cluster_id, group in sorted(duplicate_clusters.items())
     ]
+    action_payload = {
+        label: {"count": len(group), "paths": sorted(record.path for record in group)}
+        for label, group in sorted(action_groups.items())
+    }
+    canonical = sorted(record.path for record in records if record.likely_canonical)
+    orphan_local = sorted(
+        record.path for record in records if record.github and record.github.orphan_candidate
+    )
+    needs_reconciliation = sorted(
+        record.path
+        for record in records
+        if record.github
+        and (record.github.orphan_candidate or record.github.remote_matches is False)
+    )
 
     payload: dict[str, object] = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "by_project_type": by_type,
         "duplicates": duplicates,
         "heuristic_duplicates": heuristic_duplicates,
+        "action_groups": action_payload,
+        "canonical_repos": {"count": len(canonical), "paths": canonical},
+        "orphan_local_repos": {"count": len(orphan_local), "paths": orphan_local},
+        "repos_needing_reconciliation": {
+            "count": len(needs_reconciliation),
+            "paths": needs_reconciliation,
+        },
+        "merge_candidates": action_payload.get("MERGE_CANDIDATE", {"count": 0, "paths": []}),
     }
     (outputs_dir / "repo_groups.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -110,6 +140,7 @@ def render_agent_brief(
             lines.append(
                 f"- {item.name} ({item.project_type}) at `{item.path}`: score {item.score}; "
                 f"{', '.join(item.reasons)}"
+                f"{_recommendation_suffix(item.recommendation_labels)}"
             )
     else:
         lines.append("- No repositories were selected within the current token budget.")
@@ -120,7 +151,9 @@ def render_agent_brief(
             paths = duplicate.get("paths", []) if isinstance(duplicate, dict) else []
             key = duplicate.get("id") or duplicate.get("key") or "unknown"
             reasons = ", ".join(duplicate.get("reasons", []))
-            suffix = f" ({reasons})" if reasons else ""
+            confidence = duplicate.get("confidence")
+            confidence_text = f", confidence {confidence}" if confidence else ""
+            suffix = f" ({reasons}{confidence_text})" if reasons or confidence else ""
             lines.append(f"- {key}{suffix}: {', '.join(paths)}")
     else:
         lines.append("- No likely duplicates were detected.")
@@ -139,6 +172,15 @@ def render_agent_brief(
             lines.append(f"- {record.name} at `{record.path}`: maturity {record.maturity_score}")
     else:
         lines.append("- No obvious archive candidates were detected.")
+
+    lines.extend(["", "## Merge candidates", ""])
+    merge_candidates = _records_with_label(records, "MERGE_CANDIDATE")
+    if merge_candidates:
+        for record in merge_candidates[:10]:
+            reasons = ", ".join(record.recommendation_reasons[:2])
+            lines.append(f"- {record.name} at `{record.path}`: {reasons}")
+    else:
+        lines.append("- No merge candidates were detected.")
 
     lines.extend(["", "## Next AI actions", ""])
     if selected:
@@ -184,6 +226,8 @@ def render_agent_handoff(
             lines.append(f"- {item.rank}. `{item.path}` ({item.project_type}) score {item.score}")
             if item.reasons:
                 lines.append(f"  Reason: {', '.join(item.reasons[:4])}")
+            if item.recommendation_labels:
+                lines.append(f"  Action: {', '.join(item.recommendation_labels)}")
     else:
         lines.append("- No repositories selected under the current token budget.")
 
@@ -195,7 +239,9 @@ def render_agent_handoff(
             cluster_id = duplicate.get("id") or duplicate.get("key", "duplicate")
             reasons = ", ".join(duplicate.get("reasons", []))
             paths = duplicate.get("paths", [])
-            lines.append(f"- {cluster_id}: {reasons}")
+            confidence = duplicate.get("confidence")
+            confidence_text = f" confidence {confidence}" if confidence else ""
+            lines.append(f"- {cluster_id}:{confidence_text} {reasons}".rstrip())
             for path in paths[:4]:
                 lines.append(f"  - `{path}`")
     else:
@@ -207,6 +253,23 @@ def render_agent_handoff(
             lines.append(f"- `{record.path}` maturity {record.maturity_score}")
     else:
         lines.append("- None obvious.")
+
+    lines.extend(["", "## Likely primary / canonical repos"])
+    canonical = [record for record in records if record.likely_canonical]
+    if canonical:
+        for record in canonical[:8]:
+            lines.append(f"- `{record.path}` {', '.join(record.recommendation_labels)}")
+    else:
+        lines.append("- None identified.")
+
+    lines.extend(["", "## Merge candidates"])
+    merge_candidates = _records_with_label(records, "MERGE_CANDIDATE")
+    if merge_candidates:
+        for record in merge_candidates[:8]:
+            labels = ", ".join(record.recommendation_labels)
+            lines.append(f"- `{record.path}` {labels}")
+    else:
+        lines.append("- None detected.")
 
     lines.extend(["", "## Needs reconciliation"])
     if needs_reconciliation:
@@ -243,11 +306,29 @@ def _inventory_markdown(records: list[RepoRecord]) -> str:
     ]
     for record in records:
         duplicate = record.duplicate_cluster_id or ""
-        signals = ", ".join(record.duplicate_signals[:3])
+        labels = ", ".join(record.recommendation_labels[:3])
+        signals = ", ".join([*record.duplicate_signals[:2], *([labels] if labels else [])])
         lines.append(
             f"| {record.name} | {record.project_type} | {'yes' if record.is_git else 'no'} | "
             f"{record.maturity_score} | {duplicate} | {signals} | `{record.path}` |"
         )
+    lines.extend(["", "## Action Groups", ""])
+    action_groups: dict[str, list[RepoRecord]] = defaultdict(list)
+    for record in records:
+        for label in record.recommendation_labels:
+            action_groups[label].append(record)
+    if action_groups:
+        for label, group in sorted(action_groups.items()):
+            lines.append(f"- {label}: {len(group)}")
+    else:
+        lines.append("- No recommendation labels have been assigned.")
+    canonical = [record for record in records if record.likely_canonical]
+    lines.extend(["", "## Likely primary / canonical repos", ""])
+    if canonical:
+        for record in canonical[:20]:
+            lines.append(f"- {record.name}: `{record.path}`")
+    else:
+        lines.append("- None identified.")
     return "\n".join(lines) + "\n"
 
 
@@ -284,3 +365,14 @@ def _stale_records(records: list[RepoRecord]) -> list[RepoRecord]:
         ],
         key=lambda record: (record.maturity_score, record.name or "", record.path),
     )
+
+
+def _records_with_label(records: list[RepoRecord], label: str) -> list[RepoRecord]:
+    return sorted(
+        [record for record in records if label in record.recommendation_labels],
+        key=lambda record: (record.name or "", record.path),
+    )
+
+
+def _recommendation_suffix(labels: list[str]) -> str:
+    return f"; action {', '.join(labels)}" if labels else ""

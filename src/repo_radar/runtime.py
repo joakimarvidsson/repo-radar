@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from repo_radar.config import RadarConfig, SSHSourceConfig, load_config
+from repo_radar.discovery.base import DEFAULT_SKIP_DIRS
 
 COMMON_DEVELOPER_DIRS = [
     "projects",
@@ -63,6 +64,7 @@ class RuntimeContext(BaseModel):
                 for root in source.roots
             ],
             "warnings": self.warnings,
+            "effective_excludes": effective_excludes(self.config),
         }
 
     def to_state(self) -> RuntimeState:
@@ -200,7 +202,7 @@ def resolve_runtime_context(
             state_path=state_file,
             config_path=config_path,
         )
-        return _with_root_warnings(context, cwd or Path.cwd())
+        return _with_root_warnings(context, cwd or Path.cwd(), home or Path.home())
 
     config = RadarConfig(outputs_dir=outputs_dir)
     source_mode: Literal["cli", "config", "state", "auto", "none"]
@@ -242,7 +244,7 @@ def resolve_runtime_context(
         state_path=state_file,
         config_path=None,
     )
-    return _with_root_warnings(context, cwd or Path.cwd())
+    return _with_root_warnings(context, cwd or Path.cwd(), home or Path.home())
 
 
 def persist_runtime_context(context: RuntimeContext) -> Path:
@@ -288,12 +290,17 @@ def _effective_ssh_roots(config: RadarConfig) -> list[str]:
     return roots
 
 
-def _with_root_warnings(context: RuntimeContext, cwd: Path) -> RuntimeContext:
+def _with_root_warnings(context: RuntimeContext, cwd: Path, home: Path) -> RuntimeContext:
     warnings = list(context.warnings)
     if not context.local_roots and not context.ssh_targets:
         warnings.append("No viable local roots or SSH sources were found.")
     elif _only_current_directory(context.local_roots, cwd):
         warnings.append("Only the current working directory will be scanned.")
+    for root in context.local_roots:
+        if _is_broad_root(root, home):
+            warnings.append(
+                f"Broad root requested: {root}. Default exclusions will skip heavy directories."
+            )
     return context.model_copy(update={"warnings": warnings})
 
 
@@ -317,3 +324,16 @@ def _looks_like_project_root(path: Path) -> bool:
         "src",
     ]
     return any((path / marker).exists() for marker in markers)
+
+
+def effective_excludes(config: RadarConfig) -> list[str]:
+    return sorted(set(DEFAULT_SKIP_DIRS) | set(config.ignore_patterns))
+
+
+def _is_broad_root(path: Path, home: Path | None = None) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        resolved = path.expanduser()
+    home_path = (home or Path.home()).expanduser().resolve()
+    return resolved == home_path or resolved == Path("/")

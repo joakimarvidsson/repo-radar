@@ -39,6 +39,8 @@ inventory -> digest -> shortlist -> full pack -> agent brief
 - Cluster probable duplicates with explainable signals from remotes, manifests,
   folder signatures, README hashes, and structural similarity.
 - Rank repositories with inspectable positive and negative scoring factors.
+- Assign action labels such as `INSPECT`, `KEEP`, `ARCHIVE_CANDIDATE`,
+  `MERGE_CANDIDATE`, `DUPLICATE_OF`, and `NEEDS_RECONCILIATION`.
 - Generate JSON, Markdown, priority queues, compressed digests, full packs, and agent briefs.
 - Generate compact AI handoff notes for a coding agent or model.
 - Support dry runs for discovery and packing commands.
@@ -128,6 +130,11 @@ Scan a specific local root without editing config:
 repo-radar scan --root /path/to/workspace
 repo-radar inventory --root /path/to/workspace --root /path/to/another/workspace
 ```
+
+Broad roots such as `--root ~` are allowed when explicitly requested. `repo-radar`
+prints a warning and keeps strong default exclusions for noisy directories including
+`.git`, `.venv`, `node_modules`, `.cache`, `Library`, `Downloads`, `Movies`, `Music`,
+`Pictures`, `Applications`, `Trash`, and generated `outputs`.
 
 Force or disable auto-discovery:
 
@@ -260,20 +267,29 @@ github:
 ## Duplicate detection and scoring
 
 Duplicate detection is deterministic and explainable. Repo records can receive a
-`duplicate_cluster_id` and `duplicate_signals` when practical heuristics agree:
+`duplicate_cluster_id`, `duplicate_confidence`, `duplicate_signals`, and
+`likely_canonical` when practical heuristics agree:
 
 - normalized Git remote URL match
 - same resolved local path discovered through different roots
 - same manifest/package name
+- same README title
 - same README content hash
 - same top-level folder signature
-- same basename with strong structural similarity
+- normalized basename and obvious suffix variants such as `-old`, `_backup`, `-copy`,
+  and dated variants
+- same basename with strong structural or manifest similarity
 
 Shortlist scoring writes a `score_breakdown` for every ranked repo in
 `outputs/repo_priority_queue.json`. Positive factors include maturity, recent activity,
 clean Git state, source/test/docs structure, classification confidence, and packability.
 Negative factors include duplicate penalties, GitHub drift, orphan remotes, stale repos,
 and incomplete project signals.
+
+Rendered inventory, brief, handoff, and groups outputs include action-oriented
+recommendation labels so the result is not just a list of repositories. The grouped views
+highlight inspect-first repos, duplicate clusters, canonical repos, merge candidates,
+archive candidates, orphan local repos, and repositories needing reconciliation.
 
 ## SSH scanning
 

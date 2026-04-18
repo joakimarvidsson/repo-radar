@@ -128,3 +128,24 @@ def test_parse_ssh_target_accepts_user_host_and_host_only():
     assert user_source.roots == ["/srv/projects"]
     assert host_source.user is None
     assert host_source.host == "example.invalid"
+
+
+def test_broad_home_root_warns_and_surfaces_effective_excludes(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    context = resolve_runtime_context(
+        config_path=None,
+        outputs_dir=tmp_path / "out",
+        cli_roots=[home],
+        state_path=tmp_path / "state.json",
+        cwd=home / "repo",
+        home=home,
+    )
+
+    summary = context.source_summary()
+    assert context.local_roots == [home.resolve()]
+    assert any("Broad root requested" in warning for warning in context.warnings)
+    assert ".git" in summary["effective_excludes"]
+    assert "Library" in summary["effective_excludes"]
+    assert "Downloads" in summary["effective_excludes"]

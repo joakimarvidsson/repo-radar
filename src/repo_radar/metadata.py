@@ -71,6 +71,7 @@ def extract_local_metadata(
         key_directories=key_dirs,
         manifest_names=manifest_names,
         readme_hash=_readme_hash(path),
+        readme_title=_readme_title(path),
         top_level_signature=_top_level_signature(path),
     )
 
@@ -238,6 +239,22 @@ def _readme_hash(path: Path) -> str | None:
             if not normalized:
                 return None
             return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return None
+
+
+def _readme_title(path: Path) -> str | None:
+    for name in ["README.md", "README.rst", "README.txt"]:
+        readme = path / name
+        if not readme.is_file():
+            continue
+        try:
+            lines = readme.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            return None
+        for line in lines[:20]:
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                return " ".join(stripped.lower().split())
     return None
 
 

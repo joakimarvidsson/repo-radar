@@ -15,6 +15,8 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
             project_type="python",
             duplicate_cluster_id="dup-001",
             duplicate_signals=["normalized-remote"],
+            likely_canonical=True,
+            recommendation_labels=["KEEP"],
         ),
         RepoRecord(
             path="/workspace/b",
@@ -22,6 +24,7 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
             project_type="python",
             duplicate_cluster_id="dup-001",
             duplicate_signals=["normalized-remote"],
+            recommendation_labels=["DUPLICATE_OF", "MERGE_CANDIDATE"],
         ),
         RepoRecord(
             path="/workspace/stale",
@@ -29,6 +32,7 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
             project_type="repo-like",
             maturity_score=5,
             github=GitHubReconciliation(orphan_candidate=True, exists=False),
+            recommendation_labels=["ARCHIVE_CANDIDATE", "NEEDS_RECONCILIATION"],
         ),
     ]
     queue = [
@@ -59,6 +63,9 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
     assert "Inspect first" in content
     assert "dup-001" in content
     assert "Needs reconciliation" in content
+    assert "Merge candidates" in content
+    assert "Likely primary / canonical repos" in content
+    assert "KEEP" in content
     assert "Recommended next commands" in content
     assert len(content.splitlines()) < 80
 

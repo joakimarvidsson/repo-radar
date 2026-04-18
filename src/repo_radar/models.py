@@ -58,6 +58,8 @@ class DuplicateCluster(RadarBaseModel):
     paths: list[str] = Field(default_factory=list)
     names: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    confidence: int = 0
+    canonical_path: str | None = None
 
 
 class RepoRecord(RadarBaseModel):
@@ -82,8 +84,14 @@ class RepoRecord(RadarBaseModel):
     manifest_names: list[str] = Field(default_factory=list)
     readme_hash: str | None = None
     top_level_signature: str | None = None
+    readme_title: str | None = None
     duplicate_cluster_id: str | None = None
+    duplicate_confidence: int = 0
+    duplicate_canonical_path: str | None = None
     duplicate_signals: list[str] = Field(default_factory=list)
+    likely_canonical: bool = False
+    recommendation_labels: list[str] = Field(default_factory=list)
+    recommendation_reasons: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def fill_name(self) -> RepoRecord:
@@ -104,6 +112,8 @@ class PriorityQueueItem(RadarBaseModel):
         default_factory=lambda: {"positive": {}, "negative": {}}
     )
     classification_confidence: int = 0
+    recommendation_labels: list[str] = Field(default_factory=list)
+    recommendation_reasons: list[str] = Field(default_factory=list)
     selected: bool = False
 
 

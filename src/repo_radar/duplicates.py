@@ -7,6 +7,19 @@ from urllib.parse import urlparse
 
 from repo_radar.models import DuplicateCluster, RepoRecord
 
+REASON_WEIGHTS = {
+    "normalized-remote": 95,
+    "same-git-root": 95,
+    "manifest-name": 80,
+    "readme-hash": 75,
+    "readme-title": 65,
+    "top-level-signature": 60,
+    "basename-variant": 55,
+    "basename-structural-similarity": 50,
+    "normalized-basename": 50,
+    "manifest-similarity": 40,
+}
+
 
 def normalize_remote_url(url: str) -> str | None:
     clean = url.strip()
@@ -54,12 +67,31 @@ def assign_duplicate_clusters(
     _union_by_key(updated, union, _resolved_path_keys, "same-git-root")
     _union_by_key(updated, union, _manifest_keys, "manifest-name")
     _union_by_key(updated, union, _readme_keys, "readme-hash")
+    _union_by_key(updated, union, _readme_title_keys, "readme-title")
     _union_by_key(updated, union, _signature_keys, "top-level-signature")
 
     for left in range(len(updated)):
         for right in range(left + 1, len(updated)):
+            left_name = updated[left].name or Path(updated[left].path).name
+            right_name = updated[right].name or Path(updated[right].path).name
+            left_normalized = normalize_basename(left_name)
+            right_normalized = normalize_basename(right_name)
+            if left_normalized == right_normalized and left_normalized:
+                reason = (
+                    "basename-variant"
+                    if (updated[left].name or "") != (updated[right].name or "")
+                    else "normalized-basename"
+                )
+                if _structural_similarity(updated[left], updated[right]) >= 0.45:
+                    union(left, right, reason)
             if _same_basename_structural_similarity(updated[left], updated[right]):
                 union(left, right, "basename-structural-similarity")
+            if _manifest_similarity(updated[left], updated[right]) >= 0.6 and (
+                left_normalized == right_normalized
+                or _readme_title_normalized(updated[left])
+                == _readme_title_normalized(updated[right])
+            ):
+                union(left, right, "manifest-similarity")
 
     components: dict[int, list[int]] = defaultdict(list)
     for index in range(len(updated)):
@@ -76,12 +108,27 @@ def assign_duplicate_clusters(
     for number, indexes in enumerate(cluster_components, start=1):
         cluster_id = f"dup-{number:03d}"
         reasons = _component_reasons(indexes, reasons_by_pair)
+        confidence = _cluster_confidence(reasons)
+        canonical_index = _canonical_index(updated, indexes)
+        canonical_path = updated[canonical_index].path
         paths = sorted(updated[index].path for index in indexes)
         names = sorted({updated[index].name or Path(updated[index].path).name for index in indexes})
         for index in indexes:
             updated[index].duplicate_cluster_id = cluster_id
             updated[index].duplicate_signals = reasons
-        clusters.append(DuplicateCluster(id=cluster_id, paths=paths, names=names, reasons=reasons))
+            updated[index].duplicate_confidence = confidence
+            updated[index].duplicate_canonical_path = canonical_path
+            updated[index].likely_canonical = index == canonical_index
+        clusters.append(
+            DuplicateCluster(
+                id=cluster_id,
+                paths=paths,
+                names=names,
+                reasons=reasons,
+                confidence=confidence,
+                canonical_path=canonical_path,
+            )
+        )
 
     return updated, clusters
 
@@ -123,6 +170,11 @@ def _readme_keys(record: RepoRecord) -> list[str]:
     return [f"readme:{record.readme_hash}"] if record.readme_hash else []
 
 
+def _readme_title_keys(record: RepoRecord) -> list[str]:
+    title = _readme_title_normalized(record)
+    return [f"readme-title:{title}"] if title else []
+
+
 def _signature_keys(record: RepoRecord) -> list[str]:
     if not record.top_level_signature or record.top_level_signature.count("|") < 2:
         return []
@@ -134,13 +186,25 @@ def _same_basename_structural_similarity(left: RepoRecord, right: RepoRecord) ->
         return False
     if left.project_type != right.project_type:
         return False
+    return _structural_similarity(left, right) >= 0.6
+
+
+def _structural_similarity(left: RepoRecord, right: RepoRecord) -> float:
     left_signals = set(left.key_directories) | set(left.markers) | set(left.primary_languages)
     right_signals = set(right.key_directories) | set(right.markers) | set(right.primary_languages)
     if not left_signals or not right_signals:
-        return False
+        return 0.0
     overlap = len(left_signals & right_signals)
     denominator = max(len(left_signals), len(right_signals))
-    return denominator > 0 and overlap / denominator >= 0.6
+    return overlap / denominator if denominator else 0.0
+
+
+def _manifest_similarity(left: RepoRecord, right: RepoRecord) -> float:
+    left_manifests = {marker for marker in left.markers if _is_manifest_marker(marker)}
+    right_manifests = {marker for marker in right.markers if _is_manifest_marker(marker)}
+    if not left_manifests or not right_manifests:
+        return 0.0
+    return len(left_manifests & right_manifests) / max(len(left_manifests), len(right_manifests))
 
 
 def _component_reasons(
@@ -160,3 +224,66 @@ def _remote_key(host: str, path: str) -> str:
     if normalized_path.endswith(".git"):
         normalized_path = normalized_path[:-4]
     return f"{host}/{normalized_path}".lower()
+
+
+def normalize_basename(name: str) -> str:
+    normalized = name.lower().strip()
+    normalized = re.sub(r"[\s_]+", "-", normalized)
+    normalized = re.sub(r"(\.git)$", "", normalized)
+    normalized = re.sub(
+        r"[-_](old|backup|bak|copy|archive|archived|wip|tmp|temp)(-\d+)?$",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"[-_](19|20)\d{2}([-_]?\d{2})?([-_]?\d{2})?$", "", normalized)
+    normalized = re.sub(r"[-_]\d{8}$", "", normalized)
+    normalized = re.sub(r"[-_]+$", "", normalized)
+    return normalized
+
+
+def _readme_title_normalized(record: RepoRecord) -> str | None:
+    if not record.readme_title:
+        return None
+    return re.sub(r"\s+", " ", record.readme_title.lower()).strip()
+
+
+def _is_manifest_marker(marker: str) -> bool:
+    return marker in {
+        "pyproject.toml",
+        "requirements.txt",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+    }
+
+
+def _cluster_confidence(reasons: list[str]) -> int:
+    return min(100, sum(REASON_WEIGHTS.get(reason, 20) for reason in set(reasons)))
+
+
+def _canonical_index(records: list[RepoRecord], indexes: list[int]) -> int:
+    return max(
+        indexes,
+        key=lambda index: (_canonical_score(records[index]), _path_sort_key(records[index])),
+    )
+
+
+def _canonical_score(record: RepoRecord) -> int:
+    name = record.name or Path(record.path).name
+    normalized = normalize_basename(name)
+    suffix_penalty = 0 if normalized == name.lower().replace("_", "-") else -25
+    remote_bonus = 20 if record.git and record.git.remotes else 0
+    structure_bonus = min(20, len(record.key_directories) * 5)
+    return (
+        record.maturity_score
+        + record.classification_confidence
+        + remote_bonus
+        + structure_bonus
+        + suffix_penalty
+    )
+
+
+def _path_sort_key(record: RepoRecord) -> str:
+    return "~" + record.path

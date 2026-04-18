@@ -11,6 +11,7 @@ from repo_radar.duplicates import assign_duplicate_clusters
 from repo_radar.metadata import extract_local_metadata
 from repo_radar.models import PriorityQueueItem, RepoRecord
 from repo_radar.packers import create_packer, pack_repositories, pack_shortlisted_repos
+from repo_radar.recommendations import annotate_queue_with_recommendations, apply_recommendations
 from repo_radar.reconciliation import GitHubCache, reconcile_records
 from repo_radar.rendering import (
     render_agent_brief,
@@ -152,6 +153,8 @@ def run_scan(
         token_budget=config.shortlist.token_budget,
         max_repos=config.shortlist.max_repos,
     )
+    records = apply_recommendations(records, {item.path: item.score for item in queue})
+    queue = annotate_queue_with_recommendations(queue, records)
     if dry_run:
         return records, queue
     groups = write_inventory_outputs(records, outputs_dir)
