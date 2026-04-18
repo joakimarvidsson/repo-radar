@@ -14,10 +14,16 @@ from repo_radar.models import DiscoveredProject
 
 class LocalFilesystemAdapter:
     def __init__(
-        self, ignore_patterns: list[str] | None = None, include_patterns: list[str] | None = None
+        self,
+        ignore_patterns: list[str] | None = None,
+        include_patterns: list[str] | None = None,
+        broad_scan: bool = False,
+        include_noise: bool = False,
     ):
         self.ignore_patterns = ignore_patterns or []
         self.include_patterns = include_patterns or []
+        self.broad_scan = broad_scan
+        self.include_noise = include_noise
 
     def discover(self, source: LocalSourceConfig) -> list[DiscoveredProject]:
         if not source.enabled:
@@ -71,7 +77,13 @@ class LocalFilesystemAdapter:
             except OSError:
                 continue
             for child in reversed(children):
-                if should_skip_dir(child, root, self.ignore_patterns):
+                if should_skip_dir(
+                    child,
+                    root,
+                    self.ignore_patterns,
+                    broad_scan=self.broad_scan,
+                    include_noise=self.include_noise,
+                ):
                     continue
                 stack.append(child)
         return result

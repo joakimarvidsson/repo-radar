@@ -149,3 +149,8 @@ def test_broad_home_root_warns_and_surfaces_effective_excludes(tmp_path):
     assert ".git" in summary["effective_excludes"]
     assert "Library" in summary["effective_excludes"]
     assert "Downloads" in summary["effective_excludes"]
+    assert ".codex" in summary["effective_excludes"]
+    assert ".cursor" in summary["effective_excludes"]
+    assert ".bun/install/cache" in summary["noise_suppression_rules"]
+    assert summary["include_noise"] is False
+    assert context.config.max_depth == 3

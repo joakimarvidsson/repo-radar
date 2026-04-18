@@ -84,6 +84,8 @@ class RadarConfig(BaseModel):
     ignore_patterns: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
     max_depth: int = 5
+    include_noise: bool = False
+    broad_scan: bool = False
     outputs_dir: Path = Path("outputs")
     github: GitHubSettings = Field(default_factory=GitHubSettings)
     packer: PackerSettings = Field(default_factory=PackerSettings)

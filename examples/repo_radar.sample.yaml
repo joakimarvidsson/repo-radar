@@ -24,6 +24,7 @@ ssh_sources:
     timeout_seconds: 30
 
 max_depth: 5
+include_noise: false
 
 ignore_patterns:
   - .git/**

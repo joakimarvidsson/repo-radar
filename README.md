@@ -41,6 +41,8 @@ inventory -> digest -> shortlist -> full pack -> agent brief
 - Rank repositories with inspectable positive and negative scoring factors.
 - Assign action labels such as `INSPECT`, `KEEP`, `ARCHIVE_CANDIDATE`,
   `MERGE_CANDIDATE`, `DUPLICATE_OF`, and `NEEDS_RECONCILIATION`.
+- Suppress noisy broad-scan results such as package caches, editor extensions,
+  notebook checkpoints, generated folders, and plugin marketplaces by default.
 - Generate JSON, Markdown, priority queues, compressed digests, full packs, and agent briefs.
 - Generate compact AI handoff notes for a coding agent or model.
 - Support dry runs for discovery and packing commands.
@@ -135,6 +137,13 @@ Broad roots such as `--root ~` are allowed when explicitly requested. `repo-rada
 prints a warning and keeps strong default exclusions for noisy directories including
 `.git`, `.venv`, `node_modules`, `.cache`, `Library`, `Downloads`, `Movies`, `Music`,
 `Pictures`, `Applications`, `Trash`, and generated `outputs`.
+
+Include suppressed broad-scan noise only when you explicitly want to inspect it:
+
+```bash
+repo-radar scan --root ~ --include-noise --dry-run
+repo-radar handoff --root ~ --include-noise
+```
 
 Force or disable auto-discovery:
 
@@ -290,6 +299,23 @@ Rendered inventory, brief, handoff, and groups outputs include action-oriented
 recommendation labels so the result is not just a list of repositories. The grouped views
 highlight inspect-first repos, duplicate clusters, canonical repos, merge candidates,
 archive candidates, orphan local repos, and repositories needing reconciliation.
+
+## Noise suppression
+
+Broad scans classify repo-like folders into practical noise classes:
+
+- `USER_PROJECT`
+- `SYSTEM_OR_VENDOR`
+- `CACHE_OR_PACKAGE_STORE`
+- `GENERATED_OR_EPHEMERAL`
+- `EDITOR_EXTENSION`
+- `NOTEBOOK_CHECKPOINT`
+- `UNKNOWN`
+
+By default, suppressed noise is excluded from broad scans where possible and heavily
+penalized when explicitly included with `--include-noise`. Suppressed items are not
+selected for the shortlist and are summarized by class in AI handoff outputs instead of
+being listed individually.
 
 ## SSH scanning
 

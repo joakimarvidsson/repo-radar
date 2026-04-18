@@ -90,6 +90,54 @@ def test_render_agent_handoff_mentions_effective_sources(tmp_path):
     assert "deploy@example.invalid:/srv/projects" in content
 
 
+def test_render_agent_handoff_summarizes_noise_without_flooding(tmp_path):
+    records = [
+        RepoRecord(
+            path="/workspace/app",
+            name="app",
+            project_type="python",
+            recommendation_labels=["INSPECT"],
+        ),
+        RepoRecord(
+            path="/home/user/.bun/install/cache/pkg",
+            name="pkg",
+            project_type="node",
+            noise_class="CACHE_OR_PACKAGE_STORE",
+            suppressed=True,
+            recommendation_labels=["SUPPRESSED_NOISE"],
+        ),
+    ]
+    queue = [
+        PriorityQueueItem(
+            rank=1,
+            name="app",
+            path="/workspace/app",
+            project_type="python",
+            score=90,
+            selected=True,
+            recommendation_labels=["INSPECT"],
+        ),
+        PriorityQueueItem(
+            rank=2,
+            name="pkg",
+            path="/home/user/.bun/install/cache/pkg",
+            project_type="node",
+            score=-100,
+            selected=False,
+            suppressed=True,
+            noise_class="CACHE_OR_PACKAGE_STORE",
+            recommendation_labels=["SUPPRESSED_NOISE"],
+        ),
+    ]
+
+    path = render_agent_handoff(records, queue, {"duplicates": []}, tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Suppressed noise summary" in content
+    assert "CACHE_OR_PACKAGE_STORE: 1" in content
+    assert "/home/user/.bun/install/cache/pkg" not in content
+
+
 def test_cli_handoff_writes_agent_handoff_from_existing_outputs(tmp_path):
     outputs = tmp_path / "outputs"
     outputs.mkdir()

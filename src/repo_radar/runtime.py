@@ -9,7 +9,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from repo_radar.config import RadarConfig, SSHSourceConfig, load_config
-from repo_radar.discovery.base import DEFAULT_SKIP_DIRS
+from repo_radar.discovery.base import (
+    BROAD_NOISE_SKIP_DIRS,
+    BROAD_NOISE_SKIP_PATTERNS,
+    DEFAULT_SKIP_DIRS,
+)
+from repo_radar.noise import NOISE_SUPPRESSION_RULES
 
 COMMON_DEVELOPER_DIRS = [
     "projects",
@@ -65,6 +70,8 @@ class RuntimeContext(BaseModel):
             ],
             "warnings": self.warnings,
             "effective_excludes": effective_excludes(self.config),
+            "noise_suppression_rules": NOISE_SUPPRESSION_RULES,
+            "include_noise": self.config.include_noise,
         }
 
     def to_state(self) -> RuntimeState:
@@ -163,6 +170,7 @@ def resolve_runtime_context(
     auto: bool | None = None,
     ssh_targets: list[str] | None = None,
     ssh_roots: list[str] | None = None,
+    include_noise: bool = False,
     state_path: Path | None = None,
     cwd: Path | None = None,
     home: Path | None = None,
@@ -176,6 +184,7 @@ def resolve_runtime_context(
 
     if config_path is not None:
         config = load_config(config_path)
+        config.include_noise = include_noise or config.include_noise
         source_mode: Literal["cli", "config", "state", "auto", "none"] = "config"
         if cli_root_list:
             config.local_sources = []
@@ -192,6 +201,9 @@ def resolve_runtime_context(
                 for source in config.ssh_sources
             ]
         config.outputs_dir = outputs_dir
+        config.broad_scan = any(_is_broad_root(root, home or Path.home()) for root in local_roots)
+        if config.broad_scan and not config.include_noise:
+            config.max_depth = min(config.max_depth, 3)
         context = RuntimeContext(
             config=config,
             source_mode=source_mode,
@@ -221,6 +233,10 @@ def resolve_runtime_context(
 
     config.local_sources = []
     config.local_roots = local_roots
+    config.include_noise = include_noise
+    config.broad_scan = any(_is_broad_root(root, home or Path.home()) for root in local_roots)
+    if config.broad_scan and not config.include_noise:
+        config.max_depth = min(config.max_depth, 3)
 
     effective_ssh_targets = ssh_targets or (
         [] if auto is True else (state.ssh_targets if state else [])
@@ -327,7 +343,12 @@ def _looks_like_project_root(path: Path) -> bool:
 
 
 def effective_excludes(config: RadarConfig) -> list[str]:
-    return sorted(set(DEFAULT_SKIP_DIRS) | set(config.ignore_patterns))
+    return sorted(
+        set(DEFAULT_SKIP_DIRS)
+        | set(BROAD_NOISE_SKIP_DIRS)
+        | set(BROAD_NOISE_SKIP_PATTERNS)
+        | set(config.ignore_patterns)
+    )
 
 
 def _is_broad_root(path: Path, home: Path | None = None) -> bool:

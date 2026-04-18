@@ -62,6 +62,10 @@ SSHRootOption = Annotated[
     list[str] | None,
     typer.Option("--ssh-root", help="Remote root for --ssh targets. Repeat for multiple roots."),
 ]
+IncludeNoiseOption = Annotated[
+    bool,
+    typer.Option("--include-noise", help="Include cache/vendor/generated scan results."),
+]
 
 
 def _resolve(
@@ -71,6 +75,7 @@ def _resolve(
     auto: bool | None = None,
     ssh_targets: list[str] | None = None,
     ssh_roots: list[str] | None = None,
+    include_noise: bool = False,
 ) -> RuntimeContext:
     return resolve_runtime_context(
         config_path=config_path,
@@ -79,6 +84,7 @@ def _resolve(
         auto=auto,
         ssh_targets=ssh_targets,
         ssh_roots=ssh_roots,
+        include_noise=include_noise,
     )
 
 
@@ -103,13 +109,26 @@ def _print_effective_sources(context: RuntimeContext) -> None:
     excludes = context.source_summary().get("effective_excludes") or []
     if isinstance(excludes, list) and excludes:
         console.print("effective excludes:")
-        console.print("- " + ", ".join(str(item) for item in excludes[:20]))
+        console.print("- " + ", ".join(str(item) for item in excludes))
+    rules = context.source_summary().get("noise_suppression_rules") or []
+    if isinstance(rules, list) and rules:
+        state = "off" if context.config.include_noise else "on"
+        console.print(f"noise suppression: {state}")
 
 
 def _remember(context: RuntimeContext, dry_run: bool) -> None:
     if dry_run or context.config_path is not None:
         return
     persist_runtime_context(context)
+
+
+def _has_source_override(
+    roots: list[Path] | None = None,
+    auto: bool | None = None,
+    ssh_targets: list[str] | None = None,
+    include_noise: bool = False,
+) -> bool:
+    return bool(roots or auto is not None or ssh_targets or include_noise)
 
 
 @app.command()
@@ -121,12 +140,13 @@ def scan(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
     pack: Annotated[
         bool, typer.Option("--pack", help="Generate full packs for shortlisted repos.")
     ] = False,
     limit: Annotated[int | None, typer.Option("--limit", help="Limit digest generation.")] = None,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
     records, queue = run_scan(
         context.config,
@@ -158,8 +178,9 @@ def inventory(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
     records = discover_inventory(context.config, dry_run=dry_run)
     if dry_run:
@@ -182,10 +203,15 @@ def reconcile(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
-    records = load_inventory(outputs_dir) or discover_inventory(context.config, dry_run=dry_run)
+    records = (
+        discover_inventory(context.config, dry_run=dry_run)
+        if _has_source_override(roots, auto, ssh_targets, include_noise)
+        else load_inventory(outputs_dir) or discover_inventory(context.config, dry_run=dry_run)
+    )
     records = maybe_reconcile(records, context.config, outputs_dir=outputs_dir, dry_run=dry_run)
     if dry_run:
         console.print(format_scan_summary(build_scan_summary(records)))
@@ -270,12 +296,22 @@ def brief(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
     config = context.config
-    records = load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
-    queue = load_queue(outputs_dir) or build_priority_queue(
+    source_override = _has_source_override(roots, auto, ssh_targets, include_noise)
+    records = (
+        discover_inventory(config, dry_run=dry_run)
+        if source_override
+        else load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
+    )
+    queue = (
+        build_priority_queue(records, config.shortlist.token_budget, config.shortlist.max_repos)
+        if source_override
+        else load_queue(outputs_dir)
+    ) or build_priority_queue(
         records,
         config.shortlist.token_budget,
         config.shortlist.max_repos,
@@ -302,12 +338,22 @@ def handoff(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
     config = context.config
-    records = load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
-    queue = load_queue(outputs_dir) or build_priority_queue(
+    source_override = _has_source_override(roots, auto, ssh_targets, include_noise)
+    records = (
+        discover_inventory(config, dry_run=dry_run)
+        if source_override
+        else load_inventory(outputs_dir) or discover_inventory(config, dry_run=dry_run)
+    )
+    queue = (
+        build_priority_queue(records, config.shortlist.token_budget, config.shortlist.max_repos)
+        if source_override
+        else load_queue(outputs_dir)
+    ) or build_priority_queue(
         records,
         config.shortlist.token_budget,
         config.shortlist.max_repos,
@@ -363,8 +409,9 @@ def doctor(
     auto: AutoOption = None,
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
+    include_noise: IncludeNoiseOption = False,
 ) -> None:
-    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots)
+    context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     config_report = validate_config(config_path) if config_path is not None else None
     packer_status = get_packer_status(context.config.packer)
 

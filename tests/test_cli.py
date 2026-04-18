@@ -194,6 +194,57 @@ def test_cli_handoff_runs_without_config(monkeypatch, tmp_path):
     assert handoff_exists
 
 
+def test_cli_handoff_with_root_override_ignores_stale_inventory(monkeypatch, tmp_path):
+    state_path = tmp_path / "state.json"
+    project = tmp_path / "project"
+    outputs = tmp_path / "outputs"
+    project.mkdir()
+    outputs.mkdir()
+    (project / "package.json").write_text('{"name":"fresh"}', encoding="utf-8")
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {"path": "/stale/path", "name": "stale", "project_type": "python", "maturity_score": 80}
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    (outputs / "repo_priority_queue.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "rank": 1,
+      "name": "stale",
+      "path": "/stale/path",
+      "project_type": "python",
+      "score": 100,
+      "selected": true,
+      "reasons": ["stale"]
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("REPO_RADAR_STATE_PATH", str(state_path))
+
+    result = CliRunner().invoke(
+        app,
+        ["handoff", "--root", str(project), "--outputs-dir", str(outputs)],
+    )
+
+    content = (outputs / "agent_handoff.md").read_text(encoding="utf-8")
+    assert result.exit_code == 0, result.output
+    assert str(project) in content
+    assert "/stale/path" not in content
+
+
 def test_cli_scan_dry_run_prints_summary_and_effective_excludes(monkeypatch, tmp_path):
     state_path = tmp_path / "state.json"
     home = tmp_path / "home"
@@ -211,3 +262,48 @@ def test_cli_scan_dry_run_prints_summary_and_effective_excludes(monkeypatch, tmp
     assert "duplicate clusters:" in result.output
     assert "effective excludes:" in result.output
     assert "Downloads" in result.output
+
+
+def test_cli_broad_scan_suppresses_noise_by_default_and_can_include_it(monkeypatch, tmp_path):
+    state_path = tmp_path / "state.json"
+    home = tmp_path / "home"
+    project = home / "projects" / "real-app"
+    cache_pkg = home / ".bun" / "install" / "cache" / "pkg@1.0.0@@@1"
+    project.mkdir(parents=True)
+    cache_pkg.mkdir(parents=True)
+    (project / "package.json").write_text('{"name":"real-app"}', encoding="utf-8")
+    (cache_pkg / "package.json").write_text('{"name":"pkg"}', encoding="utf-8")
+    monkeypatch.setenv("REPO_RADAR_STATE_PATH", str(state_path))
+    monkeypatch.setenv("HOME", str(home))
+
+    default_result = CliRunner().invoke(app, ["scan", "--root", str(home), "--dry-run"])
+    include_result = CliRunner().invoke(
+        app,
+        ["scan", "--root", str(home), "--dry-run", "--include-noise"],
+    )
+
+    assert default_result.exit_code == 0, default_result.output
+    assert "total discovered: 1" in default_result.output
+    assert "pkg@1.0.0" not in default_result.output
+    assert include_result.exit_code == 0, include_result.output
+    assert "total discovered: 2" in include_result.output
+    assert "suppressed noise: 1" in include_result.output
+
+
+def test_cli_broad_scan_skips_top_level_hidden_noise_by_default(monkeypatch, tmp_path):
+    state_path = tmp_path / "state.json"
+    home = tmp_path / "home"
+    hidden_project = home / ".agent" / "tools" / "generated"
+    visible_project = home / "projects" / "real-app"
+    hidden_project.mkdir(parents=True)
+    visible_project.mkdir(parents=True)
+    (hidden_project / "package.json").write_text('{"name":"generated"}', encoding="utf-8")
+    (visible_project / "package.json").write_text('{"name":"real-app"}', encoding="utf-8")
+    monkeypatch.setenv("REPO_RADAR_STATE_PATH", str(state_path))
+    monkeypatch.setenv("HOME", str(home))
+
+    result = CliRunner().invoke(app, ["scan", "--root", str(home), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "total discovered: 1" in result.output
+    assert "generated" not in result.output

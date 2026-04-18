@@ -13,6 +13,8 @@ class ScanSummary(BaseModel):
     orphan_repos: int = 0
     reconciliation_issues: int = 0
     merge_candidates: int = 0
+    suppressed_noise: int = 0
+    user_projects: int = 0
 
 
 def build_scan_summary(
@@ -42,6 +44,8 @@ def build_scan_summary(
         merge_candidates=sum(
             1 for record in records if "MERGE_CANDIDATE" in record.recommendation_labels
         ),
+        suppressed_noise=sum(1 for record in records if record.suppressed),
+        user_projects=sum(1 for record in records if record.noise_class == "USER_PROJECT"),
     )
 
 
@@ -56,5 +60,7 @@ def format_scan_summary(summary: ScanSummary) -> str:
             f"- orphan repos: {summary.orphan_repos}",
             f"- reconciliation issues: {summary.reconciliation_issues}",
             f"- merge candidates: {summary.merge_candidates}",
+            f"- suppressed noise: {summary.suppressed_noise}",
+            f"- likely user projects: {summary.user_projects}",
         ]
     )

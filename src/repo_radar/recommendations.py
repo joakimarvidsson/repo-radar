@@ -47,6 +47,12 @@ def _recommend(record: RepoRecord, score: int | None) -> RepoRecord:
         if reason not in reasons:
             reasons.append(reason)
 
+    if updated.suppressed:
+        add("SUPPRESSED_NOISE", ", ".join(updated.noise_reasons) or updated.noise_class)
+        updated.recommendation_labels = labels
+        updated.recommendation_reasons = reasons
+        return updated
+
     if updated.duplicate_cluster_id:
         if updated.likely_canonical:
             add("KEEP", f"Likely canonical for {updated.duplicate_cluster_id}")

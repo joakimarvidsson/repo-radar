@@ -30,6 +30,22 @@ def test_metadata_extracts_git_state_languages_and_counts(tmp_path):
     assert record.estimated_size_bytes > 0
 
 
+def test_metadata_can_limit_file_stat_depth(tmp_path):
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text("[project]\nname='app'\n", encoding="utf-8")
+    deep = repo / "src" / "generated" / "very" / "deep"
+    deep.mkdir(parents=True)
+    (deep / "large.py").write_text("print('skip depth')\n", encoding="utf-8")
+
+    record = extract_local_metadata(
+        DiscoveredProject(path=str(repo), source_name="local"),
+        max_file_depth=2,
+    )
+
+    assert "Python" not in record.primary_languages
+
+
 def test_classification_scores_common_project_types(tmp_path):
     py_repo = tmp_path / "py"
     py_repo.mkdir()

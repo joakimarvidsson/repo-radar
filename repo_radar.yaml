@@ -9,6 +9,7 @@ local_sources: []
 ssh_sources: []
 
 max_depth: 5
+include_noise: false
 
 ignore_patterns:
   - .git/**

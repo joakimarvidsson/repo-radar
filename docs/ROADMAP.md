@@ -6,6 +6,7 @@
 - Expand GitHub reconciliation to batch requests and smarter cache refresh policies.
 - Add dependency/lockfile similarity to duplicate detection.
 - Add configurable recommendation weights.
+- Add configurable noise suppression rules and per-project allowlists.
 - Add richer CLI smoke checks for generated artifact shape.
 
 ## Packer backends

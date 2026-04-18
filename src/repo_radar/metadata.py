@@ -45,13 +45,19 @@ def extract_local_metadata(
     project: DiscoveredProject,
     ignore_patterns: list[str] | None = None,
     include_patterns: list[str] | None = None,
+    max_file_depth: int | None = None,
 ) -> RepoRecord:
     ignore_patterns = ignore_patterns or []
     include_patterns = include_patterns or []
     path = Path(project.path)
     markers = detect_markers(path)
     is_git = (path / ".git").exists() or _git_is_repo(path)
-    file_count, size_bytes, languages = _file_stats(path, ignore_patterns, include_patterns)
+    file_count, size_bytes, languages = _file_stats(
+        path,
+        ignore_patterns,
+        include_patterns,
+        max_depth=max_file_depth,
+    )
     key_dirs = [name for name in KEY_DIRECTORIES if (path / name).is_dir()]
     manifest_names = _manifest_names(path)
 
@@ -132,10 +138,6 @@ def _default_branch(path: Path) -> str | None:
     origin_head = _git(path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
     if origin_head.startswith("origin/"):
         return origin_head.split("/", 1)[1]
-    remote_show = _git(path, ["remote", "show", "origin"])
-    for line in remote_show.splitlines():
-        if "HEAD branch:" in line:
-            return line.split(":", 1)[1].strip()
     return None
 
 
@@ -165,29 +167,42 @@ def _file_stats(
     path: Path,
     ignore_patterns: list[str],
     include_patterns: list[str],
+    max_depth: int | None = None,
 ) -> tuple[int, int, Counter[str]]:
     file_count = 0
     size_bytes = 0
     languages: Counter[str] = Counter()
+    stack = [path]
 
-    for child in path.rglob("*"):
-        rel = child.relative_to(path).as_posix()
-        if any(part in DEFAULT_SKIP_DIRS for part in child.relative_to(path).parts):
-            continue
-        if matches_patterns(rel, ignore_patterns):
-            continue
-        if child.is_dir():
-            continue
-        if include_patterns and not matches_patterns(rel, include_patterns):
-            continue
-        file_count += 1
+    while stack:
+        current = stack.pop()
         try:
-            size_bytes += child.stat().st_size
+            children = sorted(current.iterdir(), key=lambda child: child.name)
         except OSError:
-            pass
-        language = LANGUAGE_BY_EXTENSION.get(child.suffix.lower())
-        if language:
-            languages[language] += 1
+            continue
+        for child in children:
+            rel = child.relative_to(path).as_posix()
+            if child.is_dir():
+                if max_depth is not None and len(child.relative_to(path).parts) > max_depth:
+                    continue
+                if child.name in DEFAULT_SKIP_DIRS or matches_patterns(rel, ignore_patterns):
+                    continue
+                stack.append(child)
+                continue
+            if matches_patterns(rel, ignore_patterns):
+                continue
+            if any(part in DEFAULT_SKIP_DIRS for part in child.relative_to(path).parts):
+                continue
+            if include_patterns and not matches_patterns(rel, include_patterns):
+                continue
+            file_count += 1
+            try:
+                size_bytes += child.stat().st_size
+            except OSError:
+                pass
+            language = LANGUAGE_BY_EXTENSION.get(child.suffix.lower())
+            if language:
+                languages[language] += 1
     return file_count, size_bytes, languages
 
 

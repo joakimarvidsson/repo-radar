@@ -58,6 +58,49 @@ DEFAULT_SKIP_DIRS = {
     "outputs",
 }
 
+BROAD_NOISE_SKIP_DIRS = {
+    ".antigravity",
+    ".bun",
+    ".cargo",
+    ".claude",
+    ".clawdbot",
+    ".codex",
+    ".config",
+    ".continue",
+    ".cursor",
+    ".gemini",
+    ".gemini-backups",
+    ".hermes",
+    ".local",
+    ".npm",
+    ".openclaw",
+    ".opencode",
+    ".pnpm-store",
+    ".rustup",
+    ".vscode",
+    ".cache",
+    "Library",
+    "Downloads",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Applications",
+    "Trash",
+    ".Trash",
+    "outputs",
+}
+
+BROAD_NOISE_SKIP_PATTERNS = [
+    ".cursor/extensions/**",
+    ".vscode/extensions/**",
+    ".antigravity/extensions/**",
+    "go/pkg/mod/**",
+    "plugins/marketplaces/**",
+    "plugin/marketplaces/**",
+    "**/.ipynb_checkpoints/**",
+    "**/.virtual_documents/**",
+]
+
 
 def posix_relative(path: Path, root: Path) -> str:
     try:
@@ -81,10 +124,23 @@ def matches_patterns(value: str, patterns: list[str]) -> bool:
     return False
 
 
-def should_skip_dir(path: Path, root: Path, ignore_patterns: list[str]) -> bool:
+def should_skip_dir(
+    path: Path,
+    root: Path,
+    ignore_patterns: list[str],
+    broad_scan: bool = False,
+    include_noise: bool = False,
+) -> bool:
     if path.name in DEFAULT_SKIP_DIRS:
         return True
     rel = posix_relative(path, root)
+    if broad_scan and not include_noise:
+        if path.parent == root and path.name.startswith("."):
+            return True
+        if path.name in BROAD_NOISE_SKIP_DIRS:
+            return True
+        if matches_patterns(rel, BROAD_NOISE_SKIP_PATTERNS):
+            return True
     return matches_patterns(rel, ignore_patterns)
 
 

@@ -23,6 +23,7 @@ def build_priority_queue(
             selected < max_repos
             and item.estimated_tokens > 0
             and spent + item.estimated_tokens <= token_budget
+            and not item.suppressed
         )
         item.rank = index
         item.selected = can_select
@@ -81,6 +82,8 @@ def _score_record(record: RepoRecord) -> PriorityQueueItem:
         _add(negative, "stale_penalty", -12)
     if record.maturity_score < 20:
         _add(negative, "incomplete_penalty", -8)
+    if record.suppressed:
+        _add(negative, "noise_suppression_penalty", -250)
 
     score = sum(positive.values()) + sum(negative.values())
     reasons = _top_reasons(positive, negative, record)
@@ -99,6 +102,8 @@ def _score_record(record: RepoRecord) -> PriorityQueueItem:
         reasons=reasons,
         score_breakdown={"positive": positive, "negative": negative},
         classification_confidence=record.classification_confidence,
+        noise_class=record.noise_class,
+        suppressed=record.suppressed,
     )
 
 

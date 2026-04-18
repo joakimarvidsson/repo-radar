@@ -92,6 +92,9 @@ class RepoRecord(RadarBaseModel):
     likely_canonical: bool = False
     recommendation_labels: list[str] = Field(default_factory=list)
     recommendation_reasons: list[str] = Field(default_factory=list)
+    noise_class: str = "USER_PROJECT"
+    noise_reasons: list[str] = Field(default_factory=list)
+    suppressed: bool = False
 
     @model_validator(mode="after")
     def fill_name(self) -> RepoRecord:
@@ -114,6 +117,8 @@ class PriorityQueueItem(RadarBaseModel):
     classification_confidence: int = 0
     recommendation_labels: list[str] = Field(default_factory=list)
     recommendation_reasons: list[str] = Field(default_factory=list)
+    noise_class: str = "USER_PROJECT"
+    suppressed: bool = False
     selected: bool = False
 
 

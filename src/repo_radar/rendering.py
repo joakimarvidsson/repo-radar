@@ -30,6 +30,7 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
     github_groups: dict[str, list[RepoRecord]] = defaultdict(list)
     duplicate_clusters: dict[str, list[RepoRecord]] = defaultdict(list)
     action_groups: dict[str, list[RepoRecord]] = defaultdict(list)
+    noise_groups: dict[str, list[RepoRecord]] = defaultdict(list)
 
     for record in records:
         type_groups[record.project_type].append(record)
@@ -40,6 +41,7 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
             duplicate_clusters[record.duplicate_cluster_id].append(record)
         for label in record.recommendation_labels:
             action_groups[label].append(record)
+        noise_groups[record.noise_class].append(record)
 
     for project_type, group in sorted(type_groups.items()):
         by_type[project_type] = {
@@ -97,6 +99,12 @@ def render_groups(records: list[RepoRecord], outputs_dir: Path) -> dict[str, obj
             "paths": needs_reconciliation,
         },
         "merge_candidates": action_payload.get("MERGE_CANDIDATE", {"count": 0, "paths": []}),
+        "by_noise_class": {
+            label: {"count": len(group)} for label, group in sorted(noise_groups.items())
+        },
+        "suppressed_noise": {
+            "count": sum(1 for record in records if record.suppressed),
+        },
     }
     (outputs_dir / "repo_groups.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -113,7 +121,7 @@ def render_agent_brief(
     source_summary: dict[str, object] | None = None,
 ) -> Path:
     outputs_dir.mkdir(parents=True, exist_ok=True)
-    selected = [item for item in queue if item.selected]
+    selected = [item for item in queue if item.selected and not item.suppressed]
     duplicates = groups.get("duplicates", []) if isinstance(groups, dict) else []
     needs_reconciliation = [
         record
@@ -122,6 +130,7 @@ def render_agent_brief(
         and (record.github.orphan_candidate or record.github.remote_matches is False)
     ]
     stale = _stale_records(records)
+    noise_counts = _noise_counts(records)
     lines = [
         "# repo-radar Agent Brief",
         "",
@@ -182,6 +191,13 @@ def render_agent_brief(
     else:
         lines.append("- No merge candidates were detected.")
 
+    lines.extend(["", "## Suppressed noise summary", ""])
+    if noise_counts:
+        for label, count in noise_counts.items():
+            lines.append(f"- {label}: {count}")
+    else:
+        lines.append("- No suppressed noise records are included in this output.")
+
     lines.extend(["", "## Next AI actions", ""])
     if selected:
         lines.append("- Read compressed digests before requesting a full pack.")
@@ -202,7 +218,7 @@ def render_agent_handoff(
     source_summary: dict[str, object] | None = None,
 ) -> Path:
     outputs_dir.mkdir(parents=True, exist_ok=True)
-    selected = [item for item in queue if item.selected]
+    selected = [item for item in queue if item.selected and not item.suppressed]
     duplicates = groups.get("duplicates", []) if isinstance(groups, dict) else []
     needs_reconciliation = [
         record
@@ -211,6 +227,7 @@ def render_agent_handoff(
         and (record.github.orphan_candidate or record.github.remote_matches is False)
     ]
     stale = _stale_records(records)
+    noise_counts = _noise_counts(records)
 
     lines = [
         "# repo-radar Agent Handoff",
@@ -271,6 +288,13 @@ def render_agent_handoff(
     else:
         lines.append("- None detected.")
 
+    lines.extend(["", "## Suppressed noise summary"])
+    if noise_counts:
+        for label, count in noise_counts.items():
+            lines.append(f"- {label}: {count}")
+    else:
+        lines.append("- None included.")
+
     lines.extend(["", "## Needs reconciliation"])
     if needs_reconciliation:
         for record in needs_reconciliation[:8]:
@@ -301,15 +325,16 @@ def _inventory_markdown(records: list[RepoRecord]) -> str:
         "",
         f"{len(records)} repositories and repo-like folders found.",
         "",
-        "| Name | Type | Git | Maturity | Duplicate | Signals | Path |",
-        "| --- | --- | --- | ---: | --- | --- | --- |",
+        "| Name | Type | Noise | Git | Maturity | Duplicate | Signals | Path |",
+        "| --- | --- | --- | --- | ---: | --- | --- | --- |",
     ]
     for record in records:
         duplicate = record.duplicate_cluster_id or ""
         labels = ", ".join(record.recommendation_labels[:3])
         signals = ", ".join([*record.duplicate_signals[:2], *([labels] if labels else [])])
         lines.append(
-            f"| {record.name} | {record.project_type} | {'yes' if record.is_git else 'no'} | "
+            f"| {record.name} | {record.project_type} | {record.noise_class} | "
+            f"{'yes' if record.is_git else 'no'} | "
             f"{record.maturity_score} | {duplicate} | {signals} | `{record.path}` |"
         )
     lines.extend(["", "## Action Groups", ""])
@@ -360,8 +385,11 @@ def _stale_records(records: list[RepoRecord]) -> list[RepoRecord]:
         [
             record
             for record in records
-            if record.maturity_score < 20
-            or (record.git is not None and record.git.last_commit_date is None)
+            if not record.suppressed
+            and (
+                record.maturity_score < 20
+                or (record.git is not None and record.git.last_commit_date is None)
+            )
         ],
         key=lambda record: (record.maturity_score, record.name or "", record.path),
     )
@@ -369,10 +397,22 @@ def _stale_records(records: list[RepoRecord]) -> list[RepoRecord]:
 
 def _records_with_label(records: list[RepoRecord], label: str) -> list[RepoRecord]:
     return sorted(
-        [record for record in records if label in record.recommendation_labels],
+        [
+            record
+            for record in records
+            if label in record.recommendation_labels and not record.suppressed
+        ],
         key=lambda record: (record.name or "", record.path),
     )
 
 
 def _recommendation_suffix(labels: list[str]) -> str:
     return f"; action {', '.join(labels)}" if labels else ""
+
+
+def _noise_counts(records: list[RepoRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.suppressed:
+            counts[record.noise_class] = counts.get(record.noise_class, 0) + 1
+    return dict(sorted(counts.items()))

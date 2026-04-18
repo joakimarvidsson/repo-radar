@@ -10,6 +10,7 @@ from repo_radar.discovery.ssh import SSHSourceAdapter
 from repo_radar.duplicates import assign_duplicate_clusters
 from repo_radar.metadata import extract_local_metadata
 from repo_radar.models import PriorityQueueItem, RepoRecord
+from repo_radar.noise import filter_noise
 from repo_radar.packers import create_packer, pack_repositories, pack_shortlisted_repos
 from repo_radar.recommendations import annotate_queue_with_recommendations, apply_recommendations
 from repo_radar.reconciliation import GitHubCache, reconcile_records
@@ -24,11 +25,21 @@ from repo_radar.shortlist import build_priority_queue, render_priority_queue
 
 def discover_inventory(config: RadarConfig, dry_run: bool = False) -> list[RepoRecord]:
     records: dict[tuple[str, str], RepoRecord] = {}
-    local_adapter = LocalFilesystemAdapter(config.ignore_patterns, config.include_patterns)
+    local_adapter = LocalFilesystemAdapter(
+        config.ignore_patterns,
+        config.include_patterns,
+        broad_scan=config.broad_scan,
+        include_noise=config.include_noise,
+    )
     for source in config.iter_local_sources():
         for project in local_adapter.discover(source):
             record = classify_repo(
-                extract_local_metadata(project, config.ignore_patterns, config.include_patterns)
+                extract_local_metadata(
+                    project,
+                    config.ignore_patterns,
+                    config.include_patterns,
+                    max_file_depth=2 if config.broad_scan else None,
+                )
             )
             records[(record.source_type, record.path)] = record
 
@@ -47,9 +58,12 @@ def discover_inventory(config: RadarConfig, dry_run: bool = False) -> list[RepoR
                 project_type="git-only" if project.is_git else "repo-like",
             )
             records[(record.source_type, record.path)] = record
-    clustered, _clusters = assign_duplicate_clusters(
-        sorted(records.values(), key=lambda record: (record.name or "", record.path))
+    filtered = filter_noise(
+        sorted(records.values(), key=lambda record: (record.name or "", record.path)),
+        broad_scan=config.broad_scan,
+        include_noise=config.include_noise,
     )
+    clustered, _clusters = assign_duplicate_clusters(filtered)
     return clustered
 
 
@@ -67,7 +81,9 @@ def maybe_reconcile(
     if not config.github.enabled:
         return records
     cache = _github_cache(config, outputs_dir or config.outputs_dir, read_only=dry_run)
-    reconciled = reconcile_records(records, config.github, cache=cache)
+    reconcilable = [record for record in records if not record.suppressed]
+    suppressed = [record for record in records if record.suppressed]
+    reconciled = [*reconcile_records(reconcilable, config.github, cache=cache), *suppressed]
     clustered, _clusters = assign_duplicate_clusters(reconciled)
     return clustered
 
