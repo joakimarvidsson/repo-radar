@@ -63,6 +63,26 @@ def test_render_agent_handoff_is_compact_and_action_oriented(tmp_path):
     assert len(content.splitlines()) < 80
 
 
+def test_render_agent_handoff_mentions_effective_sources(tmp_path):
+    path = render_agent_handoff(
+        records=[RepoRecord(path="/workspace/a", name="a")],
+        queue=[],
+        groups={"duplicates": []},
+        outputs_dir=tmp_path,
+        source_summary={
+            "mode": "auto",
+            "local_roots": ["/workspace"],
+            "ssh_sources": ["deploy@example.invalid:/srv/projects"],
+            "warnings": [],
+        },
+    )
+    content = path.read_text(encoding="utf-8")
+
+    assert "Source mode: auto" in content
+    assert "`/workspace`" in content
+    assert "deploy@example.invalid:/srv/projects" in content
+
+
 def test_cli_handoff_writes_agent_handoff_from_existing_outputs(tmp_path):
     outputs = tmp_path / "outputs"
     outputs.mkdir()

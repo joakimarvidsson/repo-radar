@@ -143,6 +143,7 @@ def run_scan(
     dry_run: bool = False,
     pack: bool = False,
     digest_limit: int | None = None,
+    source_summary: dict[str, object] | None = None,
 ) -> tuple[list[RepoRecord], list[PriorityQueueItem]]:
     records = discover_inventory(config, dry_run=dry_run)
     records = maybe_reconcile(records, config, outputs_dir=outputs_dir, dry_run=dry_run)
@@ -158,7 +159,7 @@ def run_scan(
     run_digest(records, config, outputs_dir, dry_run=False, limit=digest_limit)
     if pack:
         run_full_pack(records, queue, config, outputs_dir, dry_run=False)
-    render_agent_brief(records, queue, groups, outputs_dir)
+    render_agent_brief(records, queue, groups, outputs_dir, source_summary=source_summary)
     return records, queue
 
 
@@ -166,9 +167,10 @@ def run_handoff(
     records: list[RepoRecord],
     queue: list[PriorityQueueItem],
     outputs_dir: Path,
+    source_summary: dict[str, object] | None = None,
 ) -> Path:
     groups = render_groups(records, outputs_dir)
-    return render_agent_handoff(records, queue, groups, outputs_dir)
+    return render_agent_handoff(records, queue, groups, outputs_dir, source_summary=source_summary)
 
 
 def _github_cache(

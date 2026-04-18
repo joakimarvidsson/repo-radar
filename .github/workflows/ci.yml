@@ -37,5 +37,5 @@ jobs:
         run: |
           uv run repo-radar --help
           uv run repo-radar config-check --config repo_radar.yaml
-          uv run repo-radar scan --dry-run --config repo_radar.yaml
-          uv run repo-radar handoff --config repo_radar.yaml
+          uv run repo-radar scan --dry-run
+          uv run repo-radar handoff

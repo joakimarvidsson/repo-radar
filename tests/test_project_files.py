@@ -15,5 +15,5 @@ def test_ci_workflow_runs_standard_quality_gate():
     assert "uv run python -m compileall src tests" in content
     assert "uv run repo-radar --help" in content
     assert "uv run repo-radar config-check --config repo_radar.yaml" in content
-    assert "uv run repo-radar scan --dry-run --config repo_radar.yaml" in content
-    assert "uv run repo-radar handoff --config repo_radar.yaml" in content
+    assert "uv run repo-radar scan --dry-run" in content
+    assert "uv run repo-radar handoff" in content

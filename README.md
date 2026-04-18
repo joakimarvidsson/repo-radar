@@ -6,7 +6,7 @@ producing token-efficient AI-ready outputs for later use by models and agents.
 
 It is designed to be generic and open-source-friendly. No personal paths, hostnames,
 or usernames are required in the repository. Environment-specific inputs live in
-`repo_radar.yaml` or command-line options.
+command-line options, saved local runtime state, or an optional `repo_radar.yaml`.
 
 ## Why repo-radar exists
 
@@ -65,7 +65,21 @@ repo-radar --help
 
 ## Configuration
 
-Start with the committed generic config:
+No config file is required for normal use:
+
+```bash
+repo-radar scan
+repo-radar handoff
+repo-radar inventory
+```
+
+When no `--config` is supplied, `repo-radar` uses CLI inputs first, then saved local
+runtime state, then automatic local root discovery. If the current working directory
+already looks like a project, it scans that directory and warns that only the current
+project is being scanned. Otherwise it checks common developer directories such as
+`~/projects`, `~/Projects`, `~/code`, `~/Code`, `~/github`, `~/GitHub`, and `~/Documents`.
+
+Create a config only when you want a reusable checked-in or shared setup:
 
 ```bash
 cp examples/repo_radar.sample.yaml repo_radar.yaml
@@ -89,12 +103,43 @@ ssh_sources:
 Keep secrets out of config. SSH authentication should use your normal SSH agent or
 read-only deploy keys.
 
+`repo-radar` remembers last-used roots and SSH inputs in a local runtime state file.
+By default this is under `~/.local/state/repo-radar/state.json`, or under
+`$XDG_STATE_HOME/repo-radar/state.json` when `XDG_STATE_HOME` is set. Tests and
+automation can override it with `REPO_RADAR_STATE_PATH`.
+
+Precedence is:
+
+```text
+CLI flags > explicit --config > saved state > auto-discovery
+```
+
 ## CLI workflow
 
 Run the whole staged flow without writing outputs:
 
 ```bash
-repo-radar scan --dry-run --config repo_radar.yaml
+repo-radar scan --dry-run
+```
+
+Scan a specific local root without editing config:
+
+```bash
+repo-radar scan --root /path/to/workspace
+repo-radar inventory --root /path/to/workspace --root /path/to/another/workspace
+```
+
+Force or disable auto-discovery:
+
+```bash
+repo-radar scan --auto
+repo-radar doctor --no-auto
+```
+
+Add an SSH source from the CLI:
+
+```bash
+repo-radar scan --ssh user@example.invalid --ssh-root /srv/projects
 ```
 
 Write inventory files:
@@ -149,6 +194,7 @@ repo-radar scan --config repo_radar.yaml --pack
 Validate configuration and local tool availability:
 
 ```bash
+repo-radar doctor
 repo-radar config-check --config repo_radar.yaml
 repo-radar doctor --config repo_radar.yaml
 ```
@@ -168,6 +214,10 @@ repo-radar doctor --config repo_radar.yaml
 
 Digest and full-pack directories also receive `pack_metadata.json` manifests with packer
 commands, success/failure counts, and per-repository result records.
+
+`agent_brief.md` and `agent_handoff.md` include the effective scan source mode and roots
+used for that run, so downstream agents can see whether results came from CLI flags,
+explicit config, saved state, or auto-discovery.
 
 Generated output files are ignored by git except for placeholders and the sample brief.
 
@@ -250,7 +300,9 @@ uv sync
 uv run pytest
 uv run ruff check .
 uv run python -m compileall src tests
-uv run repo-radar handoff --config repo_radar.yaml
+uv run repo-radar doctor
+uv run repo-radar scan --dry-run
+uv run repo-radar handoff
 ```
 
 ## Open-source roadmap

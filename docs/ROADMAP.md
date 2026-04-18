@@ -2,6 +2,7 @@
 
 ## Near term
 
+- Add a `state clear` or `state show` command for runtime state inspection.
 - Expand GitHub reconciliation to batch requests and smarter cache refresh policies.
 - Add richer duplicate detection using lockfile and dependency similarity.
 - Add richer CLI smoke checks for generated artifact shape.

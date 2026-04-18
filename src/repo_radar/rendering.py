@@ -80,6 +80,7 @@ def render_agent_brief(
     queue: list[PriorityQueueItem],
     groups: dict[str, object],
     outputs_dir: Path,
+    source_summary: dict[str, object] | None = None,
 ) -> Path:
     outputs_dir.mkdir(parents=True, exist_ok=True)
     selected = [item for item in queue if item.selected]
@@ -98,6 +99,8 @@ def render_agent_brief(
         "",
         f"- Repositories and repo-like folders: {len(records)}",
         f"- Selected for first AI inspection: {len(selected)}",
+        "",
+        *_source_lines(source_summary),
         "",
         "## Inspect first",
         "",
@@ -154,6 +157,7 @@ def render_agent_handoff(
     queue: list[PriorityQueueItem],
     groups: dict[str, object],
     outputs_dir: Path,
+    source_summary: dict[str, object] | None = None,
 ) -> Path:
     outputs_dir.mkdir(parents=True, exist_ok=True)
     selected = [item for item in queue if item.selected]
@@ -170,6 +174,8 @@ def render_agent_handoff(
         "# repo-radar Agent Handoff",
         "",
         f"Inventory: {len(records)} repos. Shortlisted: {len(selected)}.",
+        "",
+        *_source_lines(source_summary),
         "",
         "## Inspect first",
     ]
@@ -243,6 +249,29 @@ def _inventory_markdown(records: list[RepoRecord]) -> str:
             f"{record.maturity_score} | {duplicate} | {signals} | `{record.path}` |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _source_lines(source_summary: dict[str, object] | None) -> list[str]:
+    if not source_summary:
+        return []
+    lines = [
+        "## Scan sources",
+        "",
+        f"- Source mode: {source_summary.get('mode', 'unknown')}",
+    ]
+    local_roots = source_summary.get("local_roots") or []
+    if isinstance(local_roots, list) and local_roots:
+        lines.append("- Local roots:")
+        lines.extend(f"  - `{root}`" for root in local_roots[:8])
+    ssh_sources = source_summary.get("ssh_sources") or []
+    if isinstance(ssh_sources, list) and ssh_sources:
+        lines.append("- SSH sources:")
+        lines.extend(f"  - `{source}`" for source in ssh_sources[:8])
+    warnings = source_summary.get("warnings") or []
+    if isinstance(warnings, list) and warnings:
+        lines.append("- Warnings:")
+        lines.extend(f"  - {warning}" for warning in warnings[:5])
+    return lines
 
 
 def _stale_records(records: list[RepoRecord]) -> list[RepoRecord]:
