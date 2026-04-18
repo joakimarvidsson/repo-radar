@@ -32,3 +32,9 @@ jobs:
 
       - name: Compile
         run: uv run python -m compileall src tests
+
+      - name: CLI smoke
+        run: |
+          uv run repo-radar --help
+          uv run repo-radar config-check --config repo_radar.yaml
+          uv run repo-radar scan --dry-run --config repo_radar.yaml

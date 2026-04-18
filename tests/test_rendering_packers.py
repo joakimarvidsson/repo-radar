@@ -4,7 +4,7 @@ import json
 
 from repo_radar.config import PackerSettings
 from repo_radar.models import PriorityQueueItem, RepoRecord
-from repo_radar.packers import RepomixPacker, pack_shortlisted_repos
+from repo_radar.packers import RepomixPacker, pack_repositories, pack_shortlisted_repos
 from repo_radar.rendering import render_agent_brief, render_groups, render_inventory
 from repo_radar.shortlist import build_priority_queue
 
@@ -92,3 +92,68 @@ def test_pack_shortlisted_repos_only_packs_selected_items(monkeypatch, tmp_path)
 
     assert calls == [str(selected_repo)]
     assert len(results) == 1
+
+
+def test_pack_repositories_writes_metadata_manifest(tmp_path):
+    class FakePacker:
+        def pack(self, repo_path, output_path, compressed, dry_run):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text("packed", encoding="utf-8")
+            return {
+                "repo_path": str(repo_path),
+                "output_path": str(output_path),
+                "backend": "fake",
+                "compressed": compressed,
+                "dry_run": dry_run,
+                "success": True,
+                "command": ["fake-pack"],
+                "error": None,
+            }
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    output_dir = tmp_path / "digests"
+
+    results = pack_repositories(
+        [RepoRecord(path=str(repo), name="repo")],
+        output_dir,
+        FakePacker(),
+        compressed=True,
+    )
+
+    manifest = json.loads((output_dir / "pack_metadata.json").read_text(encoding="utf-8"))
+    assert len(results) == 1
+    assert manifest["schema_version"] == "1.0"
+    assert manifest["compressed"] is True
+    assert manifest["result_count"] == 1
+    assert manifest["success_count"] == 1
+    assert manifest["results"][0]["command"] == ["fake-pack"]
+
+
+def test_pack_repositories_dry_run_does_not_write_metadata(tmp_path):
+    class FakePacker:
+        def pack(self, repo_path, output_path, compressed, dry_run):
+            return {
+                "repo_path": str(repo_path),
+                "output_path": str(output_path),
+                "backend": "fake",
+                "compressed": compressed,
+                "dry_run": dry_run,
+                "success": True,
+                "command": ["fake-pack"],
+                "error": None,
+            }
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    output_dir = tmp_path / "digests"
+
+    pack_repositories(
+        [RepoRecord(path=str(repo), name="repo")],
+        output_dir,
+        FakePacker(),
+        compressed=True,
+        dry_run=True,
+    )
+
+    assert not (output_dir / "pack_metadata.json").exists()

@@ -155,6 +155,9 @@ repo-radar doctor --config repo_radar.yaml
 - `outputs/repo_fullpacks/`
 - `outputs/agent_brief.md`
 
+Digest and full-pack directories also receive `pack_metadata.json` manifests with packer
+commands, success/failure counts, and per-repository result records.
+
 Generated output files are ignored by git except for placeholders and the sample brief.
 
 ## Repomix backend

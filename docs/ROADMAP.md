@@ -4,8 +4,7 @@
 
 - Expand GitHub reconciliation to batch requests and cache successful lookups.
 - Add richer duplicate detection using remote identity, normalized names, and manifest metadata.
-- Store packer run metadata beside digest and full pack outputs.
-- Add CLI smoke checks to CI after the command surface stabilizes.
+- Add richer CLI smoke checks after the command surface stabilizes.
 
 ## Packer backends
 

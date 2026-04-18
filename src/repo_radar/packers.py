@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -144,6 +146,8 @@ def pack_repositories(
         output_path = output_dir / f"{_safe_name(record.name or Path(record.path).name)}.xml"
         result = packer.pack(Path(record.path), output_path, compressed=compressed, dry_run=dry_run)
         results.append(_coerce_result(result))
+    if not dry_run:
+        write_pack_metadata(output_dir, results, compressed)
     return results
 
 
@@ -166,6 +170,8 @@ def pack_shortlisted_repos(
         output_path = output_dir / f"{_safe_name(record.name or Path(record.path).name)}.xml"
         result = packer.pack(Path(record.path), output_path, compressed=compressed, dry_run=dry_run)
         results.append(_coerce_result(result))
+    if not dry_run:
+        write_pack_metadata(output_dir, results, compressed)
     return results
 
 
@@ -220,6 +226,26 @@ def get_packer_status(settings: PackerSettings) -> PackerStatus:
         command=[],
         message="Install repomix or npx to enable digest and full pack generation",
     )
+
+
+def write_pack_metadata(
+    output_dir: Path,
+    results: list[PackerResult],
+    compressed: bool,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "pack_metadata.json"
+    payload = {
+        "schema_version": "1.0",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "compressed": compressed,
+        "result_count": len(results),
+        "success_count": sum(1 for result in results if result.success),
+        "failure_count": sum(1 for result in results if not result.success),
+        "results": [result.model_dump(mode="json") for result in results],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
 
 
 def _safe_name(name: str) -> str:
