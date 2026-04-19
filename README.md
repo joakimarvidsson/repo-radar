@@ -31,10 +31,13 @@ workflow works without a config file.
 The recommended alpha workflow is to run from source with Python 3.12+ and `uv`.
 `repo-radar` is not yet published as a stable package.
 
+Install `uv` first if needed: <https://docs.astral.sh/uv/getting-started/installation/>.
+
 ```bash
-git clone <repo-url>
+git clone https://github.com/joakimarvidsson/repo-radar.git
 cd repo-radar
 uv sync
+uv run repo-radar --help
 uv run repo-radar doctor
 uv run repo-radar scan --dry-run
 uv run repo-radar handoff
