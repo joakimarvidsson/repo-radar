@@ -56,6 +56,89 @@ def test_cli_scan_dry_run_does_not_write_outputs(tmp_path):
     assert not (outputs / "repo_inventory.json").exists()
 
 
+def test_cli_reconcile_github_writes_report_and_optional_plan(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {
+      "path": "/workspace/local-tool",
+      "name": "local-tool",
+      "is_git": true,
+      "project_type": "python",
+      "maturity_score": 70,
+      "git": {"remotes": {}}
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: false\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--owner",
+            "acme",
+            "--write-plan",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (outputs / "github_reconciliation.json").exists()
+    assert (outputs / "github_reconciliation.md").exists()
+    assert (outputs / "consolidation_plan.md").exists()
+    assert "Wrote GitHub reconciliation report" in result.output
+
+
+def test_cli_reconcile_github_dry_run_does_not_write_report(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {"path": "/workspace/app", "name": "app", "is_git": true, "git": {"remotes": {}}}
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: false\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Dry run" in result.output
+    assert not (outputs / "github_reconciliation.json").exists()
+
+
 def test_cli_config_check_reports_valid_config(tmp_path):
     project = tmp_path / "project"
     project.mkdir()

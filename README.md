@@ -177,6 +177,30 @@ GitHub lookup results are cached by default under:
 outputs/.cache/github_reconciliation.json
 ```
 
+For a focused, local-first reconciliation report, run:
+
+```bash
+uv run repo-radar reconcile github --root ~ --owner joakimarvidsson --write-plan
+```
+
+This writes:
+
+- `outputs/github_reconciliation.json`
+- `outputs/github_reconciliation.md`
+- `outputs/consolidation_plan.md` when `--write-plan` is set
+
+The report identifies local-only repositories, GitHub-only repositories when an
+owner scan is available, missing GitHub remotes, remote or rename drift, duplicate
+local clones that point to the same remote, canonical candidates, and manual-review
+items. Suggested commands are included as review guidance only. `repo-radar` does
+not delete, merge, move, archive, create remotes, or push repositories automatically.
+
+Use dry-run mode when you only want a summary and no output files:
+
+```bash
+uv run repo-radar reconcile github --root ~/projects --dry-run
+```
+
 ## Current limitations
 
 - This is an alpha. Output schema details and scoring weights may change.
