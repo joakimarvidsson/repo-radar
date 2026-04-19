@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from repo_radar import __version__
 from repo_radar.config import validate_config
 from repo_radar.packers import get_packer_status
 from repo_radar.pipeline import (
@@ -66,6 +67,27 @@ IncludeNoiseOption = Annotated[
     bool,
     typer.Option("--include-noise", help="Include cache/vendor/generated scan results."),
 ]
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"repo-radar {__version__}")
+        raise typer.Exit
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
+) -> None:
+    """Discover repositories and produce AI-ready inventory packs."""
 
 
 def _resolve(

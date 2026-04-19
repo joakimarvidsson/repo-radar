@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "repo-radar"
-version = "0.1.0"
+version = "0.1.0a0"
 description = "Local-first repository discovery, reconciliation, and AI-ready packing."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,6 +34,11 @@ dev = [
   "pytest>=8.2",
   "ruff>=0.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/joakimarvidsson/repo-radar"
+Repository = "https://github.com/joakimarvidsson/repo-radar"
+Issues = "https://github.com/joakimarvidsson/repo-radar/issues"
 
 [project.scripts]
 repo-radar = "repo_radar.cli:app"

@@ -252,7 +252,7 @@ wheels = [
 
 [[package]]
 name = "repo-radar"
-version = "0.1.0"
+version = "0.1.0a0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

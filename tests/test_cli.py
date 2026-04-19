@@ -35,6 +35,13 @@ github:
     assert "1 repositories" in result.output
 
 
+def test_cli_version_reports_alpha_version():
+    result = CliRunner().invoke(app, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert "repo-radar 0.1.0a0" in result.output
+
+
 def test_cli_scan_dry_run_does_not_write_outputs(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
