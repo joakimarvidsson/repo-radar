@@ -32,9 +32,10 @@ The recommended alpha workflow is to run from source with Python 3.12+ and `uv`.
 `repo-radar` is not yet published as a stable package.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/joakimarvidsson/repo-radar.git
 cd repo-radar
 uv sync
+uv run repo-radar --version
 uv run repo-radar doctor
 uv run repo-radar scan --dry-run
 uv run repo-radar handoff

@@ -26,3 +26,18 @@ def test_package_version_is_pep440_alpha():
 
     assert 'version = "0.1.0a0"' in pyproject
     assert '__version__ = "0.1.0a0"' in init_file
+
+
+def test_agents_file_documents_core_repo_expectations():
+    content = Path("AGENTS.md").read_text(encoding="utf-8")
+
+    assert "uv run pytest" in content
+    assert "outputs/.gitkeep" in content
+    assert "Preserve zero-config behavior" in content
+
+
+def test_public_project_urls_are_set_to_repository():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert "https://github.com/joakimarvidsson/repo-radar" in pyproject
+    assert "https://github.com/example/repo-radar" not in pyproject
