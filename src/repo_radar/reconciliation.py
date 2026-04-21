@@ -57,12 +57,16 @@ class ReconciliationSummary(BaseModel):
     local_only: int = 0
     github_only: int = 0
     missing_remotes: int = 0
+    non_github_remotes: int = 0
     remote_drift: int = 0
     canonical_mismatches: int = 0
     duplicate_local_clone_sets: int = 0
     likely_unpublished_local: int = 0
     human_review: int = 0
     action_count: int = 0
+    live_checks_performed: int = 0
+    live_checks_skipped: int = 0
+    live_check_limit: int | None = None
 
 
 class ReconciliationItem(BaseModel):
@@ -104,9 +108,11 @@ class GitHubReconciliationReport(BaseModel):
     owner: str | None = None
     github_access_error: str | None = None
     summary: ReconciliationSummary
+    warnings: list[str] = Field(default_factory=list)
     local_only: list[ReconciliationItem] = Field(default_factory=list)
     github_only: list[GitHubRemoteRepository] = Field(default_factory=list)
     missing_remotes: list[ReconciliationItem] = Field(default_factory=list)
+    non_github_remotes: list[ReconciliationItem] = Field(default_factory=list)
     remote_drift: list[ReconciliationItem] = Field(default_factory=list)
     canonical_mismatches: list[ReconciliationItem] = Field(default_factory=list)
     likely_unpublished_local: list[ReconciliationItem] = Field(default_factory=list)
@@ -399,11 +405,46 @@ def reconcile_records(
     return [reconcile_record(record, client, cache=cache) for record in records]
 
 
+def reconcile_records_limited(
+    records: list[RepoRecord],
+    settings: GitHubSettings,
+    limit: int | None,
+    cache: GitHubCache | None = None,
+    client: Any | None = None,
+) -> tuple[list[RepoRecord], int, int]:
+    remaining = None if limit is None else max(limit, 0)
+    performed = 0
+    skipped = 0
+    reconciled: list[RepoRecord] = []
+
+    for record in records:
+        if _github_identity_for_record(record) is None:
+            reconciled.append(record.model_copy(deep=True))
+            continue
+        if not settings.enabled or (remaining is not None and remaining <= 0):
+            skipped += 1
+            cleared = record.model_copy(deep=True)
+            cleared.github = None
+            reconciled.append(cleared)
+            continue
+        if client is None:
+            client = GhCliClient(settings)
+        reconciled.append(reconcile_record(record, client, cache=cache))
+        performed += 1
+        if remaining is not None:
+            remaining -= 1
+
+    return reconciled, performed, skipped
+
+
 def build_github_reconciliation_report(
     records: list[RepoRecord],
     owner: str | None = None,
     github_repos: list[GitHubRemoteRepository] | None = None,
     github_error: str | None = None,
+    live_checks_performed: int = 0,
+    live_checks_skipped: int = 0,
+    live_check_limit: int | None = None,
 ) -> GitHubReconciliationReport:
     considered = [
         record for record in sorted(records, key=lambda item: item.path) if not record.suppressed
@@ -424,44 +465,69 @@ def build_github_reconciliation_report(
 
     local_only: list[ReconciliationItem] = []
     missing_remotes: list[ReconciliationItem] = []
+    non_github_remotes: list[ReconciliationItem] = []
     remote_drift: list[ReconciliationItem] = []
     canonical_mismatches: list[ReconciliationItem] = []
     unpublished: list[ReconciliationItem] = []
     human_review: list[ReconciliationItem] = []
     canonical_recommendations: list[ReconciliationItem] = []
     actions: list[ReconciliationAction] = []
+    warnings: list[str] = []
 
     for record in considered:
         if record.path in containers:
             continue
         identity = identities_by_path.get(record.path)
         if identity is None:
-            item = _item_for_record(record, "No GitHub remote detected")
-            local_only.append(item)
-            if record.is_git:
-                missing_item = _item_for_record(
+            non_github_remote = _primary_non_github_remote(record)
+            if non_github_remote is not None:
+                item = _item_for_record(
                     record,
-                    "Git repository has no GitHub remote",
-                    commands=_missing_remote_commands(record, owner),
+                    "Git repository has a non-GitHub remote; not treated as unpublished on GitHub",
+                    remote=non_github_remote,
                 )
-                missing_remotes.append(missing_item)
-                actions.append(
-                    ReconciliationAction(
-                        category="missing_remote",
-                        summary=f"Review and add a GitHub remote for {record.name}",
-                        path=record.path,
-                        commands=missing_item.commands,
-                        risk="medium" if owner else "low",
+                local_only.append(item)
+                non_github_item = _item_for_record(
+                    record,
+                    "Git repository has a non-GitHub remote; "
+                    "review separately from GitHub publication candidates",
+                    remote=non_github_remote,
+                    commands=_inspect_remote_commands(record),
+                )
+                non_github_remotes.append(non_github_item)
+                human_review.append(non_github_item)
+            else:
+                item = _item_for_record(
+                    record,
+                    "Git repository has no remotes configured"
+                    if record.is_git
+                    else "No GitHub remote detected",
+                )
+                local_only.append(item)
+                if record.is_git:
+                    missing_item = _item_for_record(
+                        record,
+                        "Git repository has no remotes configured",
+                        commands=_missing_remote_commands(record, owner),
                     )
-                )
-                if _likely_unpublished(record):
-                    unpublished.append(
-                        _item_for_record(
-                            record,
-                            "Mature local git repository without a GitHub remote",
+                    missing_remotes.append(missing_item)
+                    actions.append(
+                        ReconciliationAction(
+                            category="missing_remote",
+                            summary=f"Review and add a GitHub remote for {record.name}",
+                            path=record.path,
                             commands=missing_item.commands,
+                            risk="medium" if owner else "low",
                         )
                     )
+                    if _likely_unpublished(record):
+                        unpublished.append(
+                            _item_for_record(
+                                record,
+                                "Mature local git repository without a configured remote",
+                                commands=missing_item.commands,
+                            )
+                        )
         elif owner and identity.owner.lower() != owner.lower():
             item = _item_for_record(
                 record,
@@ -530,6 +596,19 @@ def build_github_reconciliation_report(
                 ),
             )
         )
+    if live_checks_skipped:
+        if live_check_limit is not None and live_checks_performed >= live_check_limit:
+            warnings.append(
+                "Live GitHub checks were partial: "
+                f"{live_checks_performed} performed, {live_checks_skipped} skipped after "
+                f"reaching the cap of {live_check_limit}."
+            )
+        else:
+            warnings.append(
+                "Live GitHub checks are disabled by default for this report: "
+                f"{live_checks_skipped} GitHub remotes were not queried. Re-run with `--live` "
+                "to include live GitHub status."
+            )
 
     summary = ReconciliationSummary(
         total_local_records=len(considered),
@@ -538,20 +617,26 @@ def build_github_reconciliation_report(
         local_only=len(local_only),
         github_only=len(github_only),
         missing_remotes=len(missing_remotes),
+        non_github_remotes=len(non_github_remotes),
         remote_drift=len(remote_drift),
         canonical_mismatches=len(canonical_mismatches),
         duplicate_local_clone_sets=len(duplicate_groups),
         likely_unpublished_local=len(unpublished),
         human_review=len(human_review),
         action_count=len(actions),
+        live_checks_performed=live_checks_performed,
+        live_checks_skipped=live_checks_skipped,
+        live_check_limit=live_check_limit,
     )
     return GitHubReconciliationReport(
         owner=owner,
         github_access_error=github_error,
         summary=summary,
+        warnings=warnings,
         local_only=local_only,
         github_only=github_only,
         missing_remotes=missing_remotes,
+        non_github_remotes=non_github_remotes,
         remote_drift=remote_drift,
         canonical_mismatches=canonical_mismatches,
         likely_unpublished_local=unpublished,
@@ -667,6 +752,14 @@ def _missing_remote_commands(record: RepoRecord, owner: str | None) -> list[str]
     return commands
 
 
+def _inspect_remote_commands(record: RepoRecord) -> list[str]:
+    path = _quote(record.path)
+    return [
+        f"git -C {path} status -sb",
+        f"git -C {path} remote -v",
+    ]
+
+
 def _remote_expectation_commands(record: RepoRecord, identity: GitHubIdentity) -> list[str]:
     path = _quote(record.path)
     return [
@@ -778,18 +871,41 @@ def _github_reconciliation_markdown(report: GitHubReconciliationReport) -> str:
         f"- Local-only repositories: {report.summary.local_only}",
         f"- GitHub-only repositories: {report.summary.github_only}",
         f"- Missing GitHub remotes: {report.summary.missing_remotes}",
+        f"- Non-GitHub remotes: {report.summary.non_github_remotes}",
         f"- Remote drift / rename drift: {report.summary.remote_drift}",
         f"- Duplicate local clone sets: {report.summary.duplicate_local_clone_sets}",
         f"- Human-review items: {report.summary.human_review}",
+        f"- Live GitHub checks performed: {report.summary.live_checks_performed}",
+        f"- Live GitHub checks skipped: {report.summary.live_checks_skipped}",
     ]
+    if report.summary.live_check_limit is not None:
+        lines.append(f"- Live GitHub check cap: {report.summary.live_check_limit}")
     if report.owner:
         lines.append(f"- Requested GitHub owner: `{report.owner}`")
     if report.github_access_error:
         lines.append(f"- GitHub access: {report.github_access_error}")
+    if report.warnings:
+        lines.extend(["", "## Warnings", ""])
+        for warning in report.warnings:
+            lines.append(f"- {warning}")
+
+    lines.extend(
+        [
+            "",
+            "## Remote state guide",
+            "",
+            "- No remote: a local git repository has no remotes configured; "
+            "this can be a GitHub publication candidate.",
+            "- GitHub remote: at least one local remote points at `github.com`.",
+            "- Non-GitHub remote: remotes exist, but none point at GitHub; "
+            "these are not treated as unpublished on GitHub.",
+        ]
+    )
 
     _append_items(lines, "Local-only repositories", report.local_only)
     _append_github_only(lines, report.github_only)
     _append_items(lines, "Missing remotes", report.missing_remotes)
+    _append_items(lines, "Non-GitHub remotes", report.non_github_remotes)
     _append_items(lines, "Remote drift / rename drift", report.remote_drift)
     _append_items(lines, "Canonical expectation mismatches", report.canonical_mismatches)
     _append_duplicate_groups(lines, report.duplicate_local_clones_by_remote)
@@ -819,6 +935,7 @@ def _consolidation_plan_markdown(report: GitHubReconciliationReport) -> str:
     _append_actions(
         lines,
         [action for action in report.actions if action.category != "duplicate_local_clone"],
+        heading="### Fix missing or drifted remotes",
     )
     lines.extend(
         [
@@ -830,6 +947,7 @@ def _consolidation_plan_markdown(report: GitHubReconciliationReport) -> str:
     _append_actions(
         lines,
         [action for action in report.actions if action.category == "duplicate_local_clone"],
+        heading="### Review duplicate local clones",
     )
     lines.extend(
         [
@@ -893,8 +1011,12 @@ def _append_duplicate_groups(lines: list[str], groups: list[DuplicateLocalCloneG
             lines.append("  ```")
 
 
-def _append_actions(lines: list[str], actions: list[ReconciliationAction]) -> None:
-    lines.extend(["", "## Safe next commands", ""])
+def _append_actions(
+    lines: list[str],
+    actions: list[ReconciliationAction],
+    heading: str = "## Safe next commands",
+) -> None:
+    lines.extend(["", heading, ""])
     if not actions:
         lines.append("- None generated.")
         return
@@ -919,6 +1041,19 @@ def _quote(value: str) -> str:
 
 def _cache_key(identity: GitHubIdentity) -> str:
     return f"{identity.host.lower()}/{identity.owner.lower()}/{identity.name.lower()}"
+
+
+def _primary_non_github_remote(record: RepoRecord) -> str | None:
+    if not record.git or not record.git.remotes:
+        return None
+    ordered_urls = []
+    if "origin" in record.git.remotes:
+        ordered_urls.append(record.git.remotes["origin"])
+    ordered_urls.extend(url for name, url in record.git.remotes.items() if name != "origin")
+    for url in ordered_urls:
+        if parse_github_remote_url(url) is None:
+            return url
+    return None
 
 
 def _parse_datetime(value: Any) -> datetime | None:

@@ -13,6 +13,7 @@ from repo_radar.reconciliation import (
     build_github_reconciliation_report,
     parse_github_remote_url,
     reconcile_record,
+    reconcile_records_limited,
     render_github_reconciliation_outputs,
 )
 
@@ -206,6 +207,64 @@ def test_gh_client_clears_last_error_after_success(monkeypatch):
     assert client.last_error is None
 
 
+def test_gh_client_list_repos_reports_timeout(monkeypatch):
+    def fake_which(name: str):
+        return "/usr/bin/gh" if name == "gh" else None
+
+    def fake_run(args, **kwargs):
+        raise TimeoutExpired(cmd=args, timeout=1)
+
+    monkeypatch.setattr("repo_radar.reconciliation.shutil.which", fake_which)
+    monkeypatch.setattr("repo_radar.reconciliation.subprocess.run", fake_run)
+    client = GhCliClient(GitHubSettings(timeout_seconds=1))
+
+    assert client.list_repos("acme") == []
+    assert "gh repo list acme timed out" in (client.last_error or "")
+
+
+def test_reconcile_records_limited_caps_live_checks_and_tracks_skips():
+    records = [
+        RepoRecord(
+            path="/workspace/one",
+            name="one",
+            is_git=True,
+            git=GitMetadata(remotes={"origin": "https://github.com/acme/one.git"}),
+        ),
+        RepoRecord(
+            path="/workspace/two",
+            name="two",
+            is_git=True,
+            git=GitMetadata(remotes={"origin": "https://github.com/acme/two.git"}),
+        ),
+        RepoRecord(
+            path="/workspace/three",
+            name="three",
+            is_git=True,
+            git=GitMetadata(remotes={"origin": "https://github.com/acme/three.git"}),
+        ),
+    ]
+
+    class LimitedFakeGhClient(FakeGhClient):
+        def repo_view(self, identity):
+            self.queries.append(identity)
+            return {"nameWithOwner": identity.full_name, "visibility": "PRIVATE"}
+
+    reconciled, performed, skipped = reconcile_records_limited(
+        records,
+        GitHubSettings(),
+        limit=2,
+        client=LimitedFakeGhClient(),
+    )
+
+    assert performed == 2
+    assert skipped == 1
+    assert [record.github.github_repo if record.github else None for record in reconciled] == [
+        "acme/one",
+        "acme/two",
+        None,
+    ]
+
+
 def test_build_github_reconciliation_report_classifies_core_buckets():
     records = [
         RepoRecord(
@@ -295,6 +354,45 @@ def test_build_github_reconciliation_report_classifies_core_buckets():
     assert all(" rm " not in " ".join(action.commands) for action in report.actions)
 
 
+def test_build_github_reconciliation_report_distinguishes_remote_types():
+    no_remote = RepoRecord(
+        path="/workspace/no-remote",
+        name="no-remote",
+        is_git=True,
+        maturity_score=60,
+        project_type="python",
+        git=GitMetadata(remotes={}),
+    )
+    github_remote = RepoRecord(
+        path="/workspace/github",
+        name="github",
+        is_git=True,
+        git=GitMetadata(remotes={"origin": "https://github.com/acme/github.git"}),
+    )
+    gitlab_remote = RepoRecord(
+        path="/workspace/gitlab",
+        name="gitlab",
+        is_git=True,
+        maturity_score=60,
+        project_type="python",
+        git=GitMetadata(remotes={"origin": "https://gitlab.com/acme/gitlab.git"}),
+    )
+
+    report = build_github_reconciliation_report(
+        [no_remote, github_remote, gitlab_remote],
+        owner="acme",
+        github_repos=[],
+    )
+
+    assert [item.path for item in report.missing_remotes] == ["/workspace/no-remote"]
+    assert [item.path for item in report.likely_unpublished_local] == ["/workspace/no-remote"]
+    assert [item.path for item in report.non_github_remotes] == ["/workspace/gitlab"]
+    all_commands = "\n".join(command for action in report.actions for command in action.commands)
+    assert "gh repo create acme/no-remote" in all_commands
+    assert "gh repo create acme/gitlab" not in all_commands
+    assert "https://gitlab.com/acme/gitlab.git" in report.non_github_remotes[0].remote
+
+
 def test_build_github_reconciliation_report_gracefully_notes_unavailable_github_owner_scan():
     record = RepoRecord(
         path="/workspace/app",
@@ -313,6 +411,20 @@ def test_build_github_reconciliation_report_gracefully_notes_unavailable_github_
     assert report.github_access_error == "gh CLI is not authenticated"
     assert report.summary.github_only == 0
     assert any("GitHub-only" in item.reason for item in report.human_review)
+
+
+def test_build_github_reconciliation_report_includes_live_check_accounting():
+    report = build_github_reconciliation_report(
+        [],
+        live_checks_performed=2,
+        live_checks_skipped=3,
+        live_check_limit=2,
+    )
+
+    assert report.summary.live_checks_performed == 2
+    assert report.summary.live_checks_skipped == 3
+    assert report.summary.live_check_limit == 2
+    assert any("Live GitHub checks were partial" in warning for warning in report.warnings)
 
 
 def test_render_github_reconciliation_outputs_writes_json_markdown_and_plan(tmp_path):
@@ -338,3 +450,5 @@ def test_render_github_reconciliation_outputs_writes_json_markdown_and_plan(tmp_
     assert "gh repo create acme/local-tool" in markdown
     assert "Safe Consolidation Plan" in plan
     assert "Never execute destructive actions automatically" in plan
+    assert plan.count("## Safe next commands") == 0
+    assert "### Fix missing or drifted remotes" in plan
