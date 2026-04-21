@@ -30,6 +30,7 @@ class GitMetadata(RadarBaseModel):
     remotes: dict[str, str] = Field(default_factory=dict)
     git_root: str | None = None
     current_branch: str | None = None
+    upstream_branch: str | None = None
     default_branch: str | None = None
     last_commit_date: str | None = None
     ahead: int | None = None

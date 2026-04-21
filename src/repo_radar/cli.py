@@ -7,6 +7,8 @@ import typer
 from rich.console import Console
 
 from repo_radar.config import validate_config
+from repo_radar.installed_audit import build_installed_audit_report
+from repo_radar.installed_audit_rendering import render_installed_audit_outputs
 from repo_radar.packers import get_packer_status
 from repo_radar.pipeline import (
     discover_inventory,
@@ -30,7 +32,10 @@ from repo_radar.shortlist import build_priority_queue, render_priority_queue
 from repo_radar.summary import build_scan_summary, format_scan_summary
 
 app = typer.Typer(help="Discover repositories and produce AI-ready inventory packs.")
+audit_app = typer.Typer(help="Advisory audit workflows.")
+app.add_typer(audit_app, name="audit")
 console = Console(soft_wrap=True)
+DEFAULT_INSTALLED_AUDIT_LIVE_LIMIT = 25
 
 
 ConfigOption = Annotated[
@@ -129,6 +134,63 @@ def _has_source_override(
     include_noise: bool = False,
 ) -> bool:
     return bool(roots or auto is not None or ssh_targets or include_noise)
+
+
+@audit_app.command("installed")
+def audit_installed(
+    config_path: ConfigOption = None,
+    outputs_dir: OutputsOption = Path("outputs"),
+    dry_run: DryRunOption = False,
+    roots: RootOption = None,
+    auto: AutoOption = None,
+    include_noise: IncludeNoiseOption = False,
+    write_plan: Annotated[
+        bool,
+        typer.Option("--write-plan", help="Also write outputs/update_plan.md."),
+    ] = False,
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live/--no-live",
+            help="Refresh a bounded number of remotes before classifying update freshness.",
+        ),
+    ] = False,
+    live_limit: Annotated[
+        int,
+        typer.Option(
+            "--live-limit",
+            help="Maximum number of repositories to refresh when --live is enabled.",
+        ),
+    ] = DEFAULT_INSTALLED_AUDIT_LIVE_LIMIT,
+) -> None:
+    context = _resolve(config_path, outputs_dir, roots, auto, include_noise=include_noise)
+    _print_effective_sources(context)
+    records = [
+        record
+        for record in discover_inventory(context.config, dry_run=dry_run)
+        if record.source_type == "local" and record.is_git and not record.suppressed
+    ]
+    report = build_installed_audit_report(records, live=live, live_limit=live_limit)
+    if dry_run:
+        console.print(
+            "Dry run: would write installed tools freshness audit "
+            f"for {report.summary.total_git_repositories} local git repositories."
+        )
+        console.print(f"- likely safe to update: {report.summary.safe_to_update}")
+        console.print(f"- behind remote: {report.summary.behind_remote}")
+        console.print(f"- dirty working trees: {report.summary.dirty_worktrees}")
+        console.print(f"- no remote: {report.summary.no_remote}")
+        console.print(f"- non-GitHub remotes: {report.summary.non_github_remote}")
+        console.print(f"- manual review: {report.summary.manual_review}")
+        console.print(f"- live checks performed: {report.summary.live_checks_performed}")
+        console.print(f"- live checks skipped: {report.summary.live_checks_skipped}")
+        return
+    outputs = render_installed_audit_outputs(report, outputs_dir, write_plan=write_plan)
+    _remember(context, dry_run)
+    console.print(f"Wrote installed tools freshness audit to {outputs['markdown']}.")
+    console.print(f"Wrote installed tools audit JSON to {outputs['json']}.")
+    if "plan" in outputs:
+        console.print(f"Wrote advisory update plan to {outputs['plan']}.")
 
 
 @app.command()

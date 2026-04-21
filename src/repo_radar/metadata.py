@@ -97,6 +97,10 @@ def extract_git_metadata(path: Path) -> GitMetadata:
         remotes=remotes,
         git_root=_git(path, ["rev-parse", "--show-toplevel"]) or None,
         current_branch=_git(path, ["branch", "--show-current"]) or None,
+        upstream_branch=_git(
+            path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+        )
+        or None,
         default_branch=_default_branch(path),
         last_commit_date=last_commit_date,
         ahead=ahead,
