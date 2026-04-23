@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from collections.abc import Callable
@@ -14,6 +15,15 @@ from repo_radar.metadata import extract_git_metadata
 from repo_radar.models import RadarBaseModel, RepoRecord
 from repo_radar.reconciliation import parse_github_remote_url
 
+LIVE_REFRESH_TIMEOUT_SECONDS = 10
+_LIVE_REFRESH_ENV_OVERRIDES = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GCM_INTERACTIVE": "never",
+    "GIT_ASKPASS": "true",
+    "SSH_ASKPASS": "true",
+    "GIT_SSH_COMMAND": "ssh -oBatchMode=yes",
+}
+
 RemoteCategory = Literal["github_remote", "non_github_remote", "no_remote"]
 SyncStatus = Literal[
     "in_sync",
@@ -25,7 +35,7 @@ SyncStatus = Literal[
     "no_remote",
     "manual_review",
 ]
-LiveCheckStatus = Literal["not_requested", "performed", "skipped", "failed"]
+LiveCheckStatus = Literal["not_requested", "succeeded", "failed", "skipped", "capped"]
 LiveRefresher = Callable[[RepoRecord], tuple[RepoRecord, str | None]]
 
 
@@ -73,6 +83,10 @@ class InstalledAuditSummary(RadarBaseModel):
     diverged: int = 0
     detached_or_unusual: int = 0
     manual_review: int = 0
+    live_checks_attempted: int = 0
+    live_checks_succeeded: int = 0
+    live_checks_failed: int = 0
+    live_checks_capped: int = 0
     live_checks_performed: int = 0
     live_checks_skipped: int = 0
     live_check_limit: int | None = None
@@ -106,8 +120,11 @@ def build_installed_audit_report(
     ]
     refresher = refresher or refresh_record_for_live_check
     report_items: list[InstalledAuditRepo] = []
-    live_checks_performed = 0
+    live_checks_attempted = 0
+    live_checks_succeeded = 0
+    live_checks_failed = 0
     live_checks_skipped = 0
+    live_checks_capped = 0
     git_records = [
         record.model_copy(deep=True) for record in records if record.is_git and record.git
     ]
@@ -123,13 +140,21 @@ def build_installed_audit_report(
         live_error: str | None = None
         current = record
         if live and _live_eligible(record):
-            if live_checks_performed < live_limit:
+            if live_checks_attempted < live_limit:
                 current, live_error = refresher(record)
-                live_status = "failed" if live_error else "performed"
-                live_checks_performed += 1
+                live_checks_attempted += 1
+                if live_error:
+                    live_status = "failed"
+                    live_checks_failed += 1
+                else:
+                    live_status = "succeeded"
+                    live_checks_succeeded += 1
             else:
-                live_status = "skipped"
-                live_checks_skipped += 1
+                live_status = "capped"
+                live_checks_capped += 1
+        elif live:
+            live_status = "skipped"
+            live_checks_skipped += 1
         report_items.append(
             classify_installed_repo(
                 current,
@@ -138,10 +163,15 @@ def build_installed_audit_report(
             )
         )
 
-    if live and live_checks_skipped:
+    if live and live_checks_capped:
         warnings.append(
             f"Live remote refresh was capped at {live_limit} repositories; "
-            f"{live_checks_skipped} repositories remained local-only."
+            f"{live_checks_capped} repositories remained local-only."
+        )
+    if live and live_checks_failed:
+        warnings.append(
+            f"Live remote refresh failed for {live_checks_failed} repositories; "
+            "those results remained based on existing local tracking refs."
         )
 
     summary = InstalledAuditSummary(
@@ -162,7 +192,11 @@ def build_installed_audit_report(
             if item.sync_status in {"detached", "no_upstream", "manual_review"}
         ),
         manual_review=sum(1 for item in report_items if item.needs_manual_review),
-        live_checks_performed=live_checks_performed,
+        live_checks_attempted=live_checks_attempted,
+        live_checks_succeeded=live_checks_succeeded,
+        live_checks_failed=live_checks_failed,
+        live_checks_capped=live_checks_capped,
+        live_checks_performed=live_checks_succeeded,
         live_checks_skipped=live_checks_skipped,
         live_check_limit=live_limit if live else None,
     )
@@ -206,7 +240,7 @@ def classify_installed_repo(
         raise ValueError("installed audit requires git metadata")
 
     remotes = _remote_descriptors(record)
-    primary_remote = _preferred_remote(record, remotes)
+    primary_remote = _selected_remote(record, remotes)
     remote_category: RemoteCategory = "no_remote"
     if primary_remote is not None:
         remote_category = (
@@ -242,9 +276,11 @@ def classify_installed_repo(
         reasons.append("No upstream tracking branch configured")
     if sync_status == "manual_review":
         reasons.append("Tracking state could not be classified confidently")
-    if live_check_status == "performed":
-        reasons.append("Live remote refresh performed")
+    if live_check_status == "succeeded":
+        reasons.append("Live remote refresh succeeded")
     if live_check_status == "skipped":
+        reasons.append("Live remote refresh skipped because no remote was available to refresh")
+    if live_check_status == "capped":
         reasons.append("Live remote refresh skipped because the configured cap was reached")
     if live_check_error:
         reasons.append(f"Live remote refresh failed: {live_check_error}")
@@ -298,16 +334,21 @@ def classify_installed_repo(
 def refresh_record_for_live_check(record: RepoRecord) -> tuple[RepoRecord, str | None]:
     if record.git is None:
         return record, "git metadata unavailable"
-    remote_name = _preferred_remote_name(record)
+    remote_name = _selected_remote_name(record)
     if remote_name is None:
         return record, "no remote configured"
     repo_path = Path(record.git.git_root or record.path)
-    result = subprocess.run(
-        ["git", "-C", str(repo_path), "fetch", "--quiet", "--no-tags", remote_name],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "fetch", "--quiet", "--no-tags", remote_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=LIVE_REFRESH_TIMEOUT_SECONDS,
+            env=_live_refresh_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return record, f"git fetch timed out after {LIVE_REFRESH_TIMEOUT_SECONDS}s"
     if result.returncode != 0:
         error = result.stderr.strip() or result.stdout.strip() or "git fetch failed"
         return record, error
@@ -317,7 +358,7 @@ def refresh_record_for_live_check(record: RepoRecord) -> tuple[RepoRecord, str |
 
 
 def _live_eligible(record: RepoRecord) -> bool:
-    return bool(record.git and record.git.remotes)
+    return _selected_remote_name(record) is not None
 
 
 def _preferred_remote_name(record: RepoRecord) -> str | None:
@@ -328,11 +369,15 @@ def _preferred_remote_name(record: RepoRecord) -> str | None:
     return sorted(record.git.remotes)[0]
 
 
-def _preferred_remote(
+def _selected_remote_name(record: RepoRecord) -> str | None:
+    return _upstream_remote_name(record) or _preferred_remote_name(record)
+
+
+def _selected_remote(
     record: RepoRecord,
     remotes: list[InstalledAuditRemote],
 ) -> InstalledAuditRemote | None:
-    name = _preferred_remote_name(record)
+    name = _selected_remote_name(record)
     if name is None:
         return None
     for remote in remotes:
@@ -367,6 +412,19 @@ def _remote_descriptors(record: RepoRecord) -> list[InstalledAuditRemote]:
             )
         )
     return remotes
+
+
+def _upstream_remote_name(record: RepoRecord) -> str | None:
+    if record.git is None:
+        return None
+    if record.git.upstream_remote:
+        return record.git.upstream_remote
+    upstream_branch = record.git.upstream_branch or ""
+    if upstream_branch.startswith("refs/remotes/"):
+        upstream_branch = upstream_branch[len("refs/remotes/") :]
+    if "/" not in upstream_branch:
+        return None
+    return upstream_branch.split("/", 1)[0]
 
 
 def _remote_host(url: str) -> str | None:
@@ -423,10 +481,13 @@ def _suggested_commands(
         add(f"git -C {repo_path} branch -vv --all")
     if remote_category != "no_remote" or sync_status in {"no_upstream", "manual_review"}:
         add(f"git -C {repo_path} remote -v")
-    if remote_category == "non_github_remote":
-        remote_name = shlex.quote(_preferred_remote_name(record) or "origin")
-        add(f"git -C {repo_path} remote show {remote_name}")
     return commands
+
+
+def _live_refresh_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(_LIVE_REFRESH_ENV_OVERRIDES)
+    return env
 
 
 def _sort_report_items(

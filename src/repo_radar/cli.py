@@ -182,8 +182,11 @@ def audit_installed(
         console.print(f"- no remote: {report.summary.no_remote}")
         console.print(f"- non-GitHub remotes: {report.summary.non_github_remote}")
         console.print(f"- manual review: {report.summary.manual_review}")
-        console.print(f"- live checks performed: {report.summary.live_checks_performed}")
+        console.print(f"- live checks attempted: {report.summary.live_checks_attempted}")
+        console.print(f"- live checks succeeded: {report.summary.live_checks_succeeded}")
+        console.print(f"- live checks failed: {report.summary.live_checks_failed}")
         console.print(f"- live checks skipped: {report.summary.live_checks_skipped}")
+        console.print(f"- live checks capped: {report.summary.live_checks_capped}")
         return
     outputs = render_installed_audit_outputs(report, outputs_dir, write_plan=write_plan)
     _remember(context, dry_run)

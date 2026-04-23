@@ -182,7 +182,8 @@ flags behind/ahead/diverged/dirty/manual-review states; and writes:
 - `outputs/update_plan.md` when `--write-plan` is set
 
 Live remote refresh is off by default to keep broad scans bounded and local-first.
-Use it explicitly when needed:
+`--live` refreshes remote-tracking refs only, uses a short non-interactive timeout per
+repository, and keeps going if a refresh fails or times out. Use it explicitly when needed:
 
 ```bash
 uv run repo-radar audit installed --root ~ --live --live-limit 20

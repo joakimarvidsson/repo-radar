@@ -53,8 +53,11 @@ def _installed_audit_markdown(report: InstalledAuditReport) -> str:
     if report.live_mode:
         lines.extend(
             [
-                f"- Live checks performed: {summary.live_checks_performed}",
+                f"- Live checks attempted: {summary.live_checks_attempted}",
+                f"- Live checks succeeded: {summary.live_checks_succeeded}",
+                f"- Live checks failed: {summary.live_checks_failed}",
                 f"- Live checks skipped: {summary.live_checks_skipped}",
+                f"- Live checks capped: {summary.live_checks_capped}",
                 f"- Live check limit: {summary.live_check_limit}",
             ]
         )
