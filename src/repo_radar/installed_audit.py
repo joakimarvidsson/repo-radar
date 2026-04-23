@@ -370,7 +370,10 @@ def _preferred_remote_name(record: RepoRecord) -> str | None:
 
 
 def _selected_remote_name(record: RepoRecord) -> str | None:
-    return _upstream_remote_name(record) or _preferred_remote_name(record)
+    upstream_remote = _upstream_remote_name(record)
+    if upstream_remote and record.git and upstream_remote in record.git.remotes:
+        return upstream_remote
+    return _preferred_remote_name(record)
 
 
 def _selected_remote(

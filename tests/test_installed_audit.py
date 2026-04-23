@@ -142,6 +142,25 @@ def test_installed_repo_classification_uses_upstream_remote_when_present():
     assert not any("git remote show" in command for command in record.suggested_commands)
 
 
+def test_installed_repo_classification_falls_back_when_upstream_remote_is_missing():
+    record = classify_installed_repo(
+        _record(
+            "/workspace/stale-upstream",
+            remotes={"origin": "https://github.com/acme/tool.git"},
+            upstream_branch="upstream/main",
+            upstream_remote="upstream",
+            behind=1,
+            divergence_status="behind",
+        )
+    )
+
+    assert record.primary_remote is not None
+    assert record.primary_remote.name == "origin"
+    assert record.remote_category == "github_remote"
+    assert record.likely_safe_to_update is True
+    assert record.needs_manual_review is False
+
+
 def test_installed_repo_classification_handles_missing_remote():
     record = classify_installed_repo(
         _record(
