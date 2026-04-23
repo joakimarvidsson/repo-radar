@@ -154,6 +154,9 @@ Generated outputs live under `outputs/`:
 - `repo_inventory.md`
 - `repo_groups.json`
 - `repo_priority_queue.json`
+- `installed_audit.json`
+- `installed_audit.md`
+- `update_plan.md` when requested
 - `repo_digests/`
 - `repo_fullpacks/`
 - `agent_brief.md`
@@ -161,6 +164,30 @@ Generated outputs live under `outputs/`:
 
 Generated output files are ignored by Git. The repository keeps only `outputs/.gitkeep`
 so the output directory exists in fresh checkouts.
+
+## Installed tools freshness audit
+
+For a local-first audit of installed Git-based tools and repositories, run:
+
+```bash
+uv run repo-radar audit installed --root ~ --dry-run
+uv run repo-radar audit installed --root ~ --write-plan
+```
+
+The audit is advisory only. It classifies GitHub, non-GitHub, and missing remotes;
+flags behind/ahead/diverged/dirty/manual-review states; and writes:
+
+- `outputs/installed_audit.json`
+- `outputs/installed_audit.md`
+- `outputs/update_plan.md` when `--write-plan` is set
+
+Live remote refresh is off by default to keep broad scans bounded and local-first.
+`--live` refreshes remote-tracking refs only, uses a short non-interactive timeout per
+repository, and keeps going if a refresh fails or times out. Use it explicitly when needed:
+
+```bash
+uv run repo-radar audit installed --root ~ --live --live-limit 20
+```
 
 ## GitHub reconciliation
 

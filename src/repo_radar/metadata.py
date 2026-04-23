@@ -88,6 +88,7 @@ def extract_git_metadata(path: Path) -> GitMetadata:
     untracked = sum(1 for line in status_lines if line.startswith("??"))
     changed = len(status_lines) - untracked
     ahead, behind = _ahead_behind(path)
+    current_branch = _git(path, ["branch", "--show-current"]) or None
 
     last_commit_date = _git(path, ["log", "-1", "--format=%cI"]) or None
     if last_commit_date and last_commit_date.endswith("Z"):
@@ -96,7 +97,14 @@ def extract_git_metadata(path: Path) -> GitMetadata:
     return GitMetadata(
         remotes=remotes,
         git_root=_git(path, ["rev-parse", "--show-toplevel"]) or None,
-        current_branch=_git(path, ["branch", "--show-current"]) or None,
+        current_branch=current_branch,
+        upstream_branch=_git(
+            path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+        )
+        or None,
+        upstream_remote=_git(path, ["config", f"branch.{current_branch}.remote"]) or None
+        if current_branch
+        else None,
         default_branch=_default_branch(path),
         last_commit_date=last_commit_date,
         ahead=ahead,

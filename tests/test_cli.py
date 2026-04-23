@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from repo_radar.cli import app
+
+from .conftest import git_commit, git_init
 
 
 def test_cli_inventory_smoke(tmp_path):
@@ -307,3 +311,79 @@ def test_cli_broad_scan_skips_top_level_hidden_noise_by_default(monkeypatch, tmp
     assert result.exit_code == 0, result.output
     assert "total discovered: 1" in result.output
     assert "generated" not in result.output
+
+
+def test_cli_audit_installed_dry_run_does_not_write_outputs(tmp_path):
+    repo = tmp_path / "tool"
+    git_init(repo)
+    git_commit(repo)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/acme/tool.git"],
+        cwd=repo,
+        check=True,
+    )
+    config = tmp_path / "repo_radar.yaml"
+    outputs = tmp_path / "outputs"
+    config.write_text(
+        f"local_roots:\n  - {repo.as_posix()}\ngithub:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit",
+            "installed",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Dry run" in result.output
+    assert not (outputs / "installed_audit.json").exists()
+
+
+def test_cli_audit_installed_defaults_to_local_first_without_live(monkeypatch, tmp_path):
+    repo = tmp_path / "tool"
+    git_init(repo)
+    git_commit(repo)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/acme/tool.git"],
+        cwd=repo,
+        check=True,
+    )
+    config = tmp_path / "repo_radar.yaml"
+    outputs = tmp_path / "outputs"
+    config.write_text(
+        f"local_roots:\n  - {repo.as_posix()}\ngithub:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    def unexpected_live_refresh(*args, **kwargs):
+        raise AssertionError("installed audit should stay local-first without --live")
+
+    monkeypatch.setattr(
+        "repo_radar.installed_audit.refresh_record_for_live_check",
+        unexpected_live_refresh,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit",
+            "installed",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((outputs / "installed_audit.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["live_checks_performed"] == 0
+    assert payload["summary"]["live_checks_skipped"] == 0
