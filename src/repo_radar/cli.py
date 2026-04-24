@@ -19,6 +19,14 @@ from repo_radar.pipeline import (
     write_inventory_outputs,
 )
 from repo_radar.recommendations import annotate_queue_with_recommendations, apply_recommendations
+from repo_radar.reconciliation import (
+    GhCliClient,
+    GitHubCache,
+    GitHubRemoteRepository,
+    build_github_reconciliation_report,
+    reconcile_records_limited,
+    render_github_reconciliation_outputs,
+)
 from repo_radar.rendering import (
     render_agent_brief,
     render_agent_handoff,
@@ -31,6 +39,7 @@ from repo_radar.summary import build_scan_summary, format_scan_summary
 
 app = typer.Typer(help="Discover repositories and produce AI-ready inventory packs.")
 console = Console(soft_wrap=True)
+DEFAULT_GITHUB_LIVE_CHECK_LIMIT = 25
 
 
 ConfigOption = Annotated[
@@ -196,6 +205,10 @@ def inventory(
 
 @app.command()
 def reconcile(
+    target: Annotated[
+        str | None,
+        typer.Argument(help="Optional reconciliation target. Use `github` for plan output."),
+    ] = None,
     config_path: ConfigOption = None,
     outputs_dir: OutputsOption = Path("outputs"),
     dry_run: DryRunOption = False,
@@ -204,9 +217,47 @@ def reconcile(
     ssh_targets: SSHOption = None,
     ssh_roots: SSHRootOption = None,
     include_noise: IncludeNoiseOption = False,
+    owner: Annotated[
+        str | None,
+        typer.Option("--owner", help="GitHub owner used for GitHub-only and publish suggestions."),
+    ] = None,
+    write_plan: Annotated[
+        bool,
+        typer.Option("--write-plan", help="Also write outputs/consolidation_plan.md."),
+    ] = False,
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live/--no-live",
+            help="Opt into live GitHub checks for this reconciliation report.",
+        ),
+    ] = False,
+    live_limit: Annotated[
+        int,
+        typer.Option(
+            "--live-limit",
+            help="Maximum number of per-repo live GitHub checks when --live is enabled.",
+        ),
+    ] = DEFAULT_GITHUB_LIVE_CHECK_LIMIT,
 ) -> None:
     context = _resolve(config_path, outputs_dir, roots, auto, ssh_targets, ssh_roots, include_noise)
     _print_effective_sources(context)
+    if target == "github":
+        _reconcile_github(
+            context,
+            outputs_dir,
+            dry_run=dry_run,
+            owner=owner,
+            write_plan=write_plan,
+            live=live,
+            live_limit=live_limit,
+            source_override=_has_source_override(roots, auto, ssh_targets, include_noise),
+        )
+        _remember(context, dry_run)
+        return
+    if target is not None:
+        console.print(f"Unknown reconciliation target: {target}")
+        raise typer.Exit(code=2)
     records = (
         discover_inventory(context.config, dry_run=dry_run)
         if _has_source_override(roots, auto, ssh_targets, include_noise)
@@ -221,6 +272,119 @@ def reconcile(
     write_inventory_outputs(records, outputs_dir)
     _remember(context, dry_run)
     console.print(f"Wrote reconciled inventory for {len(records)} repositories.")
+
+
+def _reconcile_github(
+    context: RuntimeContext,
+    outputs_dir: Path,
+    dry_run: bool = False,
+    owner: str | None = None,
+    write_plan: bool = False,
+    live: bool = False,
+    live_limit: int = DEFAULT_GITHUB_LIVE_CHECK_LIMIT,
+    source_override: bool = False,
+) -> None:
+    records = (
+        discover_inventory(context.config, dry_run=dry_run)
+        if source_override
+        else load_inventory(outputs_dir) or discover_inventory(context.config, dry_run=dry_run)
+    )
+    report_records = [record.model_copy(deep=True) for record in records]
+    for record in report_records:
+        record.github = None
+
+    cache = _github_cache(context, outputs_dir, dry_run=dry_run) if live else None
+    if live:
+        report_records, live_checks_performed, live_checks_skipped = reconcile_records_limited(
+            report_records,
+            context.config.github,
+            limit=live_limit,
+            cache=cache,
+        )
+        github_repos, github_error = _github_owner_repos(owner, context, live=True)
+    else:
+        disabled_github = context.config.github.model_copy(update={"enabled": False})
+        report_records, live_checks_performed, live_checks_skipped = reconcile_records_limited(
+            report_records,
+            disabled_github,
+            limit=0,
+        )
+        if owner:
+            github_repos = None
+            github_error = (
+                "GitHub owner scan skipped because live checks are disabled by default; "
+                "re-run with --live to include GitHub-only repositories."
+            )
+        else:
+            github_repos, github_error = [], None
+    report = build_github_reconciliation_report(
+        report_records,
+        owner=owner,
+        github_repos=github_repos,
+        github_error=github_error,
+        live_checks_performed=live_checks_performed,
+        live_checks_skipped=live_checks_skipped,
+        live_check_limit=live_limit if live else None,
+    )
+    if dry_run:
+        console.print(
+            "Dry run: would write GitHub reconciliation report "
+            f"for {report.summary.total_local_records} local records."
+        )
+        console.print(f"- missing remotes: {report.summary.missing_remotes}")
+        console.print(f"- non-GitHub remotes: {report.summary.non_github_remotes}")
+        console.print(f"- remote drift: {report.summary.remote_drift}")
+        console.print(f"- duplicate clone sets: {report.summary.duplicate_local_clone_sets}")
+        console.print(f"- live checks performed: {report.summary.live_checks_performed}")
+        console.print(f"- live checks skipped: {report.summary.live_checks_skipped}")
+        return
+    outputs = render_github_reconciliation_outputs(report, outputs_dir, write_plan=write_plan)
+    console.print(f"Wrote GitHub reconciliation report to {outputs['markdown']}.")
+    if "plan" in outputs:
+        console.print(f"Wrote safe consolidation plan to {outputs['plan']}.")
+
+
+def _github_owner_repos(
+    owner: str | None,
+    context: RuntimeContext,
+    live: bool,
+) -> tuple[list[GitHubRemoteRepository] | None, str | None]:
+    if owner is None:
+        return [], None
+    if not live:
+        return (
+            None,
+            "GitHub owner scan skipped because live checks are disabled by default; "
+            "re-run with --live to include GitHub-only repositories.",
+        )
+    if not context.config.github.enabled:
+        return None, "GitHub access is disabled in configuration"
+    client = GhCliClient(context.config.github)
+    if not client.available:
+        return None, "gh CLI is not available"
+    if not client.authenticated:
+        return None, client.last_error or "gh CLI is not authenticated"
+    repos = client.list_repos(owner)
+    if client.last_error:
+        return None, client.last_error
+    return repos, None
+
+
+def _github_cache(
+    context: RuntimeContext,
+    outputs_dir: Path,
+    dry_run: bool,
+) -> GitHubCache | None:
+    if not context.config.github.cache_enabled:
+        return None
+    cache_path = context.config.github.cache_path or (
+        outputs_dir / ".cache" / "github_reconciliation.json"
+    )
+    return GitHubCache(
+        path=cache_path,
+        ttl_seconds=context.config.github.cache_ttl_seconds,
+        read_only=dry_run,
+    )
 
 
 @app.command()

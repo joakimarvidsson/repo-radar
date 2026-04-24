@@ -18,3 +18,12 @@
 - Keep CLI UX simple and local-first
 - Avoid adding databases, hosted backends, or unnecessary services
 - Treat monorepo/container labeling separately from duplicate detection
+
+
+<claude-mem-context>
+# Memory Context
+
+# [repo-radar] recent context, 2026-04-23 8:00pm GMT+10
+
+No previous sessions found.
+</claude-mem-context>

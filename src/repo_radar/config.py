@@ -48,6 +48,7 @@ class GitHubSettings(BaseModel):
     enabled: bool = True
     use_gh: bool = True
     timeout_seconds: int = 10
+    repo_list_limit: int = 200
     cache_enabled: bool = True
     cache_path: Path | None = None
     cache_ttl_seconds: int = 86_400

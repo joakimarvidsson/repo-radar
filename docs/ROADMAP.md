@@ -16,6 +16,8 @@
 - Add configurable noise suppression rules and per-project allowlists.
 - Add deeper monorepo family summaries for package/app ownership.
 - Add richer CLI smoke checks for generated artifact shape.
+- Add a future installed-tool freshness audit lane covering installed tools,
+  upstream sources, and update availability without changing packages by default.
 
 ## Packer backends
 

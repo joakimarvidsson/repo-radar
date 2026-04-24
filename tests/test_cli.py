@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -54,6 +55,217 @@ def test_cli_scan_dry_run_does_not_write_outputs(tmp_path):
     assert result.exit_code == 0, result.output
     assert "Dry run" in result.output
     assert not (outputs / "repo_inventory.json").exists()
+
+
+def test_cli_reconcile_github_writes_report_and_optional_plan(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {
+      "path": "/workspace/local-tool",
+      "name": "local-tool",
+      "is_git": true,
+      "project_type": "python",
+      "maturity_score": 70,
+      "git": {"remotes": {}}
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: false\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--owner",
+            "acme",
+            "--write-plan",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (outputs / "github_reconciliation.json").exists()
+    assert (outputs / "github_reconciliation.md").exists()
+    assert (outputs / "consolidation_plan.md").exists()
+    assert "Wrote GitHub reconciliation report" in result.output
+
+
+def test_cli_reconcile_github_dry_run_does_not_write_report(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {"path": "/workspace/app", "name": "app", "is_git": true, "git": {"remotes": {}}}
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: false\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Dry run" in result.output
+    assert not (outputs / "github_reconciliation.json").exists()
+
+
+def test_cli_reconcile_github_defaults_to_local_first_without_live(monkeypatch, tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 1,
+  "repositories": [
+    {
+      "path": "/workspace/app",
+      "name": "app",
+      "is_git": true,
+      "git": {"remotes": {"origin": "https://github.com/acme/app.git"}}
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: true\n", encoding="utf-8")
+
+    def unexpected_live_reconcile(*args, **kwargs):
+        raise AssertionError("reconcile github should stay local-first without --live")
+
+    def unexpected_owner_scan(*args, **kwargs):
+        raise AssertionError("owner scan should not run without --live")
+
+    monkeypatch.setattr("repo_radar.cli.maybe_reconcile", unexpected_live_reconcile)
+    monkeypatch.setattr("repo_radar.cli._github_owner_repos", unexpected_owner_scan)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--owner",
+            "acme",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((outputs / "github_reconciliation.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["live_checks_performed"] == 0
+    assert payload["summary"]["live_checks_skipped"] == 1
+    assert "--live" in payload["warnings"][0]
+
+
+def test_cli_reconcile_github_live_mode_reports_cap_and_owner_scan_failure(monkeypatch, tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "repo_inventory.json").write_text(
+        """
+{
+  "schema_version": "1.0",
+  "repository_count": 3,
+  "repositories": [
+    {
+      "path": "/workspace/one",
+      "name": "one",
+      "is_git": true,
+      "git": {"remotes": {"origin": "https://github.com/acme/one.git"}}
+    },
+    {
+      "path": "/workspace/two",
+      "name": "two",
+      "is_git": true,
+      "git": {"remotes": {"origin": "https://github.com/acme/two.git"}}
+    },
+    {
+      "path": "/workspace/three",
+      "name": "three",
+      "is_git": true,
+      "git": {"remotes": {"origin": "https://github.com/acme/three.git"}}
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "repo_radar.yaml"
+    config.write_text("local_roots:\n  - .\ngithub:\n  enabled: true\n", encoding="utf-8")
+
+    def fake_reconcile_records_limited(records, settings, limit, cache=None, client=None):
+        return records, 2, 1
+
+    def fake_owner_scan(owner, context, live):
+        assert owner == "acme"
+        assert live is True
+        return None, "gh repo list acme timed out after 10 seconds"
+
+    monkeypatch.setattr(
+        "repo_radar.cli.reconcile_records_limited",
+        fake_reconcile_records_limited,
+    )
+    monkeypatch.setattr("repo_radar.cli._github_owner_repos", fake_owner_scan)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "reconcile",
+            "github",
+            "--config",
+            str(config),
+            "--outputs-dir",
+            str(outputs),
+            "--owner",
+            "acme",
+            "--live",
+            "--live-limit",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((outputs / "github_reconciliation.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["live_checks_performed"] == 2
+    assert payload["summary"]["live_checks_skipped"] == 1
+    assert payload["summary"]["live_check_limit"] == 2
+    assert payload["github_access_error"] == "gh repo list acme timed out after 10 seconds"
+    assert any("partial" in warning.lower() for warning in payload["warnings"])
 
 
 def test_cli_config_check_reports_valid_config(tmp_path):
