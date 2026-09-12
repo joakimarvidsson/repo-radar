@@ -11,6 +11,14 @@ It is built for people who have many local projects, old experiments, cloned rep
 monorepos, package caches, and editor/plugin directories mixed together. The default
 workflow works without a config file.
 
+## Portfolio note
+
+`repo-radar` is the tool used to inventory and reconcile this machine's repos against GitHub
+during a portfolio restructure. It is intentionally local-first: useful before you ask an AI
+agent to triage hundreds of scattered clones.
+
+**Status:** public-alpha candidate. CLI and scoring may still change.
+
 ## What it does
 
 - Discovers Git repositories and repo-like folders from local roots.
